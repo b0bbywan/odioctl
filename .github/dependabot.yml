@@ -1,0 +1,18 @@
+version: 2
+updates:
+  # Also bumps the odio-ci pins (reusable workflows included): it has no
+  # floating major alias by design, so every bump is a PR here.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+
+  # Dev tooling only (ruff, mypy, pytest): the runtime has no dependencies
+  # and ships as a .deb, so this is about the uv.lock, not the package.
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      dev-tools:
+        patterns: ["*"]

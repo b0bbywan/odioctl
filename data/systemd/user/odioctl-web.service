@@ -1,0 +1,20 @@
+[Unit]
+Description=odio Settings web UI (components, upgrade, DAC)
+Documentation=https://github.com/b0bbywan/odioctl
+ConditionUser=!root
+ConditionUser=!@system
+# No [Install]: odioctl-web.socket is what gets enabled, and it pulls this in on
+# the first connection. Requires= keeps a manual `systemctl --user start
+# odioctl-web.service` on the same path instead of binding the port twice.
+Requires=odioctl-web.socket
+After=odioctl-web.socket
+
+[Service]
+Type=simple
+# ODIOCTL_ODIOS_VERSION=<tag> there points the upgrade check at an odios
+# pre-release instead of the published latest one (a test box). Both units
+# read it: `odioctl web` refreshes upgrades.json on every component toggle.
+EnvironmentFile=-/etc/default/odioctl
+ExecStart=/usr/bin/odioctl web
+Restart=on-failure
+RestartSec=2
