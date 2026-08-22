@@ -1,15 +1,16 @@
 [Unit]
-Description=odioctl web UI (components, DAC)
+Description=odio Settings web UI (components, upgrade, DAC)
 Documentation=https://github.com/b0bbywan/odioctl
 ConditionUser=!root
 ConditionUser=!@system
-After=network-online.target
+# No [Install]: odioctl-web.socket is what gets enabled, and it pulls this in on
+# the first connection. Requires= keeps a manual `systemctl --user start
+# odioctl-web.service` on the same path instead of binding the port twice.
+Requires=odioctl-web.socket
+After=odioctl-web.socket
 
 [Service]
 Type=simple
 ExecStart=/usr/bin/odioctl web
 Restart=on-failure
 RestartSec=2
-
-[Install]
-WantedBy=default.target
