@@ -76,8 +76,10 @@ dtoverlay=hifiberry-dacplus-std
 # END odioctl dac
 ```
 
-Pre-existing top-level audio lines are commented out with an
-`#odioctl-disabled: ` prefix and restored by `dac unset`. A one-time backup is
+Pre-existing top-level audio lines — a `dtparam=audio=` or an overlay the
+catalog lists — are commented out with an `#odioctl-disabled: ` prefix and
+restored by `dac unset`. An overlay the catalog does not list is left alone:
+whether a name is audio is not something to guess at. A one-time backup is
 kept as `config.txt.odioctl.bak`; a reboot is required (`/run/odioctl/reboot-required`
 flags it until then). `set`/`unset` need root — the web UI calls them through
 `sudo -n`, and the sudoers file lists every catalog id explicitly, so no other
