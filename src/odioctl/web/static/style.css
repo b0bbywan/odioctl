@@ -1,0 +1,239 @@
+/* odioctl web — hand-written CSS mirroring odio-ui (go-odio-api) so both pages on the
+   box look like one product: forest-tinted zinc palette, lime accent, rounded cards.
+   Keep in sync with go-odio-api/tailwind.config.js + ui/styles/input.css. */
+
+:root {
+  --zinc-100: #e4f0e5;
+  --zinc-300: #9ab8a2;
+  --zinc-400: #6a9472;
+  --zinc-500: #3a5440;
+  --zinc-700: #1a2a1e;
+  --zinc-800: #131d16;
+  --zinc-900: #0d1410;
+  --leaf: #4a7c59;
+  --moss: #2a4e35;
+  --lime: #5ab81e;
+  --gold: #c8963a;
+  --red: #f87171;
+  --red-bg: rgba(239, 68, 68, 0.2);
+  --red-line: rgba(239, 68, 68, 0.3);
+}
+
+* { box-sizing: border-box; }
+
+html { color-scheme: dark; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  background: var(--zinc-900);
+  color: var(--zinc-100);
+}
+
+a { color: inherit; }
+
+code {
+  font-size: 0.9em;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+/* Header — same sticky bar as odio-ui */
+header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  border-bottom: 1px solid var(--zinc-800);
+  background: rgba(13, 20, 16, 0.95);
+  backdrop-filter: blur(8px);
+}
+.wrap {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 12px 16px;
+}
+header .wrap {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.brand img { width: 40px; height: 40px; object-fit: contain; }
+.brand h1 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  text-transform: lowercase;
+}
+.brand p {
+  margin: 0;
+  font-size: 13px;
+  color: var(--zinc-500);
+}
+.links {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Badges (odio-ui .badge) */
+.badge, .chip {
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 1.2;
+  white-space: nowrap;
+  text-decoration: none;
+}
+.badge { background: rgba(26, 42, 30, 0.5); color: var(--zinc-400); }
+a.badge:hover { color: var(--zinc-100); background: var(--zinc-700); }
+.chip.installed { background: rgba(74, 124, 89, 0.1); color: var(--leaf); }
+.chip.excluded { background: var(--red-bg); color: var(--red); }
+.chip.default { background: rgba(42, 78, 53, 0.3); color: var(--zinc-300); }
+
+/* Content */
+main.wrap { padding-top: 20px; padding-bottom: 40px; }
+
+section {
+  background: var(--zinc-800);
+  border-radius: 12px;
+  padding: 16px;
+  margin: 0 0 16px;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3);
+}
+section h2 {
+  margin: 0 0 4px;
+  font-size: 18px;
+  font-weight: 600;
+}
+.hint {
+  margin: 0 0 14px;
+  font-size: 14px;
+  color: var(--zinc-400);
+}
+.hint:last-child { margin-bottom: 0; }
+.hint b { font-weight: 600; color: var(--zinc-300); }
+
+/* Banners (odio-ui toasts, but inline since the page re-renders) */
+.banner {
+  padding: 10px 14px;
+  border-radius: 10px;
+  margin: 0 0 12px;
+  font-size: 14px;
+  border: 1px solid transparent;
+}
+.banner.ok {
+  background: rgba(74, 124, 89, 0.2);
+  color: #8fc79e;
+  border-color: rgba(74, 124, 89, 0.3);
+}
+.banner.err {
+  background: var(--red-bg);
+  color: var(--red);
+  border-color: var(--red-line);
+}
+.banner.warn {
+  background: rgba(200, 150, 58, 0.15);
+  color: var(--gold);
+  border-color: rgba(200, 150, 58, 0.3);
+}
+
+/* Component rows (odio-ui .service-card) */
+section h3 {
+  margin: 16px 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--zinc-500);
+}
+.cards { display: flex; flex-direction: column; gap: 8px; }
+.hint.infra { margin: 16px 0 0; font-size: 12px; color: var(--zinc-500); }
+.hint.infra:empty { display: none; }
+.card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 8px;
+  background: rgba(13, 20, 16, 0.5);
+  transition: background-color 0.15s;
+}
+.card:hover { background: var(--zinc-900); }
+.card.child { margin-left: 24px; }
+.card .content { min-width: 0; flex: 1; }
+.card .content b { font-weight: 500; }
+.card .content small {
+  display: block;
+  font-size: 12px;
+  color: var(--zinc-400);
+}
+.card .meta {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+ul.pending { margin: 0 0 14px; padding-left: 20px; font-size: 14px; color: var(--zinc-300); }
+ul.pending li { margin: 2px 0; }
+
+/* Controls (odio-ui .btn) */
+select, button {
+  font: inherit;
+  font-size: 14px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: rgba(26, 42, 30, 0.5);
+  color: var(--zinc-100);
+}
+button { cursor: pointer; transition: background-color 0.15s, transform 0.1s; }
+button:hover { background: var(--zinc-700); }
+button:active { transform: scale(0.95); }
+button.primary { background: var(--lime); color: #0d1410; font-weight: 600; }
+button.primary:hover { background: #6ccb2c; }
+button.small { padding: 5px 10px; font-size: 13px; }
+select { flex: 1 1 240px; min-width: 0; max-width: 100%; }
+form.row button { flex-shrink: 0; }
+select:focus, button:focus-visible { outline: 2px solid rgba(90, 184, 30, 0.5); outline-offset: 1px; }
+
+.row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: 12px;
+}
+form { display: inline; }
+form.row { display: flex; flex: 1 1 auto; min-width: 0; margin: 0; }
+
+@media (max-width: 480px) {
+  form.row { flex-direction: column; align-items: stretch; }
+  form.row button { width: 100%; }
+}
+
+/* Footer */
+footer {
+  margin-top: 32px;
+  border-top: 1px solid var(--zinc-800);
+  padding: 16px 0;
+  font-size: 12px;
+  color: var(--zinc-500);
+}
+footer .wrap {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
