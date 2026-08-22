@@ -1,0 +1,39 @@
+Source: odioctl
+Section: admin
+Priority: optional
+Maintainer: Mathieu Réquillart <mathieu.requillart@gmail.com>
+Build-Depends:
+ debhelper-compat (= 13),
+ dh-python,
+ pybuild-plugin-pyproject,
+ python3-all,
+ python3-hatchling,
+Rules-Requires-Root: no
+Standards-Version: 4.7.0
+Homepage: https://github.com/b0bbywan/odioctl
+Vcs-Git: https://github.com/b0bbywan/odioctl.git
+Vcs-Browser: https://github.com/b0bbywan/odioctl
+
+Package: odioctl
+Architecture: all
+Multi-Arch: foreign
+Depends:
+ python3 (>= 3.11),
+ sudo,
+ ${misc:Depends},
+ ${python3:Depends},
+Recommends:
+ curl,
+Description: system control for odio: upgrades, components, DAC, web UI
+ odioctl drives an odio installation from the command line and from a small
+ LAN web UI:
+ .
+  * odioctl upgrade check|apply|verify — the odios upgrade path (state.json
+    vs published manifest, INSTALL_*/RUN_* derivation, install.sh re-run),
+    wired to the odio-check-upgrade timer and odio-upgrade service;
+  * odioctl components — opt roles and features in or out of the next upgrade;
+  * odioctl dac — pick the DAC dtoverlay in the Raspberry Pi config.txt;
+  * odioctl web — stdlib HTTP server with a plain-HTML page for the above.
+ .
+ Ships systemd --user units (not auto-enabled) and a sudoers fragment
+ granting the `odio` group the exact privileged commands it needs.
