@@ -1,0 +1,18 @@
+{
+  "odios": "2026.7.0rc2",
+  "roles": {
+    "bluetooth": "2026.5.0b1",
+    "branding": "2026.5.0b3",
+    "common": "2026.6.0b1",
+    "mpd": "2026.7.0rc2",
+    "mpd_discplayer": "2026.7.0rc1",
+    "odio_api": "2026.7.0rc1",
+    "pipewire": "2026.6.0b1",
+    "pulseaudio": "2026.6.0b1",
+    "shairport_sync": "2026.6.0b1",
+    "snapclient": "2026.6.0b1",
+    "spotifyd": "2026.6.0b1",
+    "upgrade": "2026.7.0rc2",
+    "upmpdcli": "2026.6.0b1"
+  }
+}
