@@ -1,0 +1,33 @@
+{
+    "features": [
+        "qobuz",
+        "tidal"
+    ],
+    "features_excluded": [
+        "mympd",
+        "upnpwebradios"
+    ],
+    "install_mode": "image",
+    "odios": "2026.7.0rc1",
+    "release_history": [
+        "2026.6.0b1",
+        "2026.7.0rc1"
+    ],
+    "roles": {
+        "bluetooth": "2026.5.0b1",
+        "branding": "2026.5.0b3",
+        "common": "2026.6.0b1",
+        "mpd": "2026.7.0rc1",
+        "odio_api": "2026.7.0rc1",
+        "pulseaudio": "2026.6.0b1",
+        "upgrade": "2026.7.0rc1",
+        "upmpdcli": "2026.6.0b1"
+    },
+    "roles_excluded": [
+        "mpd_discplayer",
+        "shairport_sync",
+        "snapclient",
+        "spotifyd"
+    ],
+    "target_user": "odio"
+}
