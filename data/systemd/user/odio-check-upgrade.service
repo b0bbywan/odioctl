@@ -1,0 +1,7 @@
+[Unit]
+Description=Check for odio upgrades
+Documentation=https://github.com/b0bbywan/odioctl
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/odioctl upgrade check
