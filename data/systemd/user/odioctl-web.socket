@@ -1,0 +1,14 @@
+[Unit]
+Description=odio Settings web UI socket
+Documentation=https://github.com/b0bbywan/odioctl
+ConditionUser=!root
+ConditionUser=!@system
+
+[Socket]
+# Binding here rather than in the service is the point: the port is held from
+# boot, `odioctl web` only starts on the first connection, and restarting it
+# never drops a connection. Both address families, like any LAN service on the box.
+ListenStream=8021
+
+[Install]
+WantedBy=sockets.target
