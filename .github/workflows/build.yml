@@ -1,0 +1,147 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: '3.12'
+      - name: Install deps
+        run: uv sync
+      # Fail fast on a tag that doesn't match __init__.py, before the rest of
+      # the pipeline burns minutes.
+      - name: Check tag matches project version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: uv run python scripts/version.py --check-tag "$GITHUB_REF_NAME"
+      - name: ruff
+        if: always()
+        run: uv run ruff check src tests scripts && uv run ruff format --check src tests scripts
+      - name: mypy
+        if: always()
+        run: uv run mypy
+      - name: sudoers matches DAC catalog
+        if: always()
+        run: uv run python scripts/gen-sudoers.py --check
+      - name: sudoers syntax
+        if: always()
+        run: sudo visudo -cf data/sudoers/odioctl
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12', '3.13', '3.14']
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install deps
+        run: uv sync
+      - name: Pytest
+        run: uv run pytest
+
+  build:
+    needs: [lint, test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: '3.12'
+      - name: Build sdist + wheel
+        run: uv build
+      - uses: actions/upload-artifact@v7
+        with:
+          name: odioctl-dist
+          path: dist/*
+          if-no-files-found: error
+
+  deb:
+    needs: [lint, test]
+    runs-on: ubuntu-latest
+    # Build inside the Debian release we target (trixie) so dh-python,
+    # debhelper and python3-* versions match what users actually have.
+    container:
+      image: debian:trixie
+    steps:
+      - name: Install build deps
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates git make lintian sudo \
+            build-essential debhelper dh-python pybuild-plugin-pyproject \
+            python3-all python3-hatchling devscripts
+
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Sync changelog from __init__.py
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          DEBFULLNAME: GitHub Actions
+          DEBEMAIL: actions@github.com
+        run: make sync-deb
+
+      - name: Build .deb
+        run: make deb
+
+      - name: Collect .deb
+        run: |
+          mkdir -p dist
+          mv ../odioctl_*.deb dist/
+          ls -lh dist/
+
+      - name: lintian
+        run: lintian --tag-display-limit 0 dist/*.deb || true
+
+      - name: Install and smoke test
+        run: |
+          apt-get install -y ./dist/odioctl_*.deb
+          odioctl --version
+          odioctl upgrade apply --help >/dev/null
+          # exit 1 = "upgrades available" is the expected verdict for the fixture
+          odioctl upgrade check --state tests/fixtures/state.json \
+            --url "file://$PWD/tests/fixtures/manifest.json" --output /tmp/upgrades.json || test $? -eq 1
+          odioctl upgrade apply --dry-run --force --state tests/fixtures/state.json
+          odioctl upgrade verify --state tests/fixtures/state.json --expected-version 2026.7.0rc1
+          odioctl components --state tests/fixtures/state.json list
+          odioctl dac list >/dev/null
+          test -f /usr/lib/systemd/user/odio-upgrade.service
+          test -f /usr/lib/systemd/user/odioctl-web.service
+          test -f /usr/lib/systemd/user/odioctl-web.socket
+          visudo -cf /etc/sudoers.d/odioctl
+          stat -c '%a' /etc/sudoers.d/odioctl | grep -qx 440
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: odioctl-deb
+          path: dist/*.deb
+          if-no-files-found: error
+
+  # Release + APT reindex live in odio-ci (shared with the other packaging
+  # repos). Only the .deb is attached: the package is the distribution, the
+  # wheel/sdist artifact above is CI output.
+  release:
+    needs: [build, deb]
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    uses: b0bbywan/odio-ci/.github/workflows/release.yml@v1.0.3
+    with:
+      artifact_pattern: odioctl-deb
+    secrets:
+      apt_repo_token: ${{ secrets.APT_REPO_TOKEN }}
