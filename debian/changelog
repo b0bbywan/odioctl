@@ -1,8 +1,8 @@
-odioctl (0.1.0) unstable; urgency=medium
+odioctl (0.1.0~beta.1) unstable; urgency=medium
 
   * Initial release: `odioctl upgrade check|apply|verify` extracted from
     odios' odio_upgrade.py (current state.json schema only, no legacy),
     `odioctl components`, `odioctl dac`, `odioctl web`, systemd --user
     units and a sudoers fragment for the `odio` group.
 
- -- Mathieu Réquillart <mathieu.requillart@gmail.com>  Tue, 18 Aug 2026 18:00:00 +0200
+ -- Mathieu Réquillart <mathieu.requillart@gmail.com>  Fri, 28 Aug 2026 22:00:00 +0200
