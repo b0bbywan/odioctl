@@ -170,6 +170,31 @@ class ActionTests(unittest.TestCase):
             self.assertNotIn("action:", out.getvalue())
 
 
+class QbzdLoginActionTests(unittest.TestCase):
+    """The catalog entry itself: what odioctl offers to run for qbzd."""
+
+    def test_login_is_the_one_action_and_takes_the_callback_host(self):
+        c = role(make_state(roles={"qbzd": "2026.9.0b1"}), "qbzd")
+        (login,) = c.actions
+        self.assertIs(components.find_action("role", "qbzd", "login"), login)
+        self.assertEqual(login.id, "login")
+        # --callback-host is what sends the OAuth redirect back to this box
+        self.assertEqual(
+            [p.format(host="odio.local") for p in login.argv],
+            ["qbzd", "login", "--callback-host", "odio.local"],
+        )
+        self.assertIn("Qobuz", login.label)
+        self.assertIn("Qobuz", login.link_label)
+
+    def test_no_action_before_qbzd_is_installed(self):
+        # opted in but not applied yet: the binary is not on the box
+        self.assertEqual(role(make_state(roles={"qbzd": ""}), "qbzd").status, "default")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            components._print_table(components.list_components(make_state(roles={"qbzd": ""})))
+        self.assertNotIn("action:", out.getvalue())
+
+
 class OptInRoleTests(unittest.TestCase):
     """Roles install.sh asks [y/N] for (qbzd): state must carry the Y explicitly."""
 

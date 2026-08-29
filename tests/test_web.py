@@ -464,6 +464,21 @@ class ComponentActionTests(WebTestCase):
         self.assertEqual(self.spawns, [])
 
 
+class QbzdLoginTests(WebTestCase):
+    """The real catalog entry, end to end through the page."""
+
+    def test_login_button_and_link_for_an_installed_qbzd(self):
+        self.write_roles(qbzd="2026.9.0b1")
+        _, body = self.get("/")
+        self.assertIn(">Log in to Qobuz<", body)
+        code, body = self.post(
+            "/components/action", {"kind": "role", "name": "qbzd", "action": "login"}
+        )
+        self.assertEqual(code, 200)
+        self.assertEqual(self.spawns, [["qbzd", "login", "--callback-host", "127.0.0.1"]])
+        self.assertIn(">Open the Qobuz sign-in page</a>", body)
+
+
 class UpgradeTests(WebTestCase):
     def test_no_report_yet(self):
         _, body = self.get("/")
