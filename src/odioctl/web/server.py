@@ -25,6 +25,7 @@ import subprocess
 import sys
 import threading
 import urllib.parse
+from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
 from http import HTTPStatus
@@ -41,6 +42,11 @@ UPGRADE_UNIT = "odio-upgrade.service"  # systemd --user unit shipped by this pac
 SD_LISTEN_FDS_START = 3  # sd_listen_fds(3): systemd hands sockets over from fd 3 up
 
 RunFn = Callable[[list[str]], "subprocess.CompletedProcess[str]"]
+SpawnFn = Callable[[list[str]], "subprocess.Popen[str]"]
+
+# How long a component action gets to print its link before we give up on it.
+# `qbzd login` fetches an app id over the network first, so it is not instant.
+ACTION_LINK_TIMEOUT = 15.0
 
 
 class ActivationError(Exception):
@@ -100,6 +106,68 @@ def _run_checked(run: RunFn, args: list[str], what: str) -> None:
         raise WebError(f"{what} failed: {detail}")
 
 
+def _default_action_spawn(argv: list[str]) -> subprocess.Popen[str]:
+    # Same user as this process (the odios target user), no sudo: a component
+    # action is exactly what the operator would type on the box.
+    return subprocess.Popen(
+        argv,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        stdin=subprocess.DEVNULL,
+        text=True,
+        bufsize=1,
+    )
+
+
+def _read_until_link(run: ActionRun, scheme: str, timeout: float) -> None:
+    """Drain the process output until it prints a link, EOF, or `timeout`.
+
+    Keeps draining in the background afterwards: the child writes a few more
+    lines when the user follows the link, and a full pipe would wedge it.
+    """
+    found = threading.Event()
+
+    def drain() -> None:
+        assert run.proc.stdout is not None
+        for line in run.proc.stdout:
+            run.output.append(line)
+            if not run.url:
+                token = next((w for w in line.split() if w.startswith(scheme)), "")
+                if token:
+                    run.url = token
+                    found.set()
+        found.set()  # EOF: nothing more is coming
+
+    threading.Thread(target=drain, daemon=True).start()
+    found.wait(timeout)
+
+
+@dataclass
+class ActionResult:
+    """What an action just did, shown once in the modal of the POST response.
+
+    Popped by `render_page`, so it never survives into the next page load:
+    what outlives the request is the pending link on the component row.
+    """
+
+    title: str
+    output: str
+    url: str = ""
+    link_label: str = ""
+
+
+@dataclass
+class ActionRun:
+    """One started action: its process, its output, and the link it printed."""
+
+    proc: subprocess.Popen[str]
+    output: deque[str]
+    url: str = ""
+
+    def alive(self) -> bool:
+        return self.proc.poll() is None
+
+
 class Services:
     """Business operations behind the pages (also unit-testable directly)."""
 
@@ -108,12 +176,19 @@ class Services:
         cfg: WebConfig,
         privileged_run: RunFn | None = None,
         user_run: RunFn | None = None,
+        action_spawn: SpawnFn | None = None,
     ) -> None:
         self.cfg = cfg
         self.privileged_run = privileged_run or _default_privileged_run(cfg)
         self.user_run = user_run or _default_user_run  # same user, no sudo (systemctl --user)
+        self.action_spawn = action_spawn or _default_action_spawn
         self.token = secrets.token_urlsafe(24)
         self._lock = threading.Lock()
+        # Started actions outlive their request: `qbzd login` waits up to 300s
+        # for the user to follow its link. Keyed by (kind, name, action id).
+        self._runs: dict[tuple[str, str, str], ActionRun] = {}
+        self._notes: dict[tuple[str, str, str], str] = {}
+        self._result: ActionResult | None = None
 
     # -- reads ----------------------------------------------------------------
 
@@ -162,6 +237,97 @@ class Services:
         if report is not None and f"{kind}:{name}" in report["pending_components"]:
             return f"{label} enabled — it will be installed by the next upgrade (apply it below)."
         return f"{label} enabled."
+
+    def run_action(self, kind: str, name: str, action_id: str, host: str) -> str:
+        """Start a catalog action and return the banner text for the page.
+
+        The command is never waited on: `qbzd login` prints its Qobuz URL and
+        then holds a listener open until the browser comes back (300s), so we
+        read stdout only until the link shows up and leave the process to it.
+        The link is then rendered next to the component until it is gone.
+        """
+        if kind not in ("role", "feature"):
+            raise WebError(f"unknown component kind {kind!r}")
+        action = components.find_action(cast(components.Kind, kind), name, action_id)
+        if action is None:
+            raise WebError(f"unknown action {action_id!r} for {name}")
+        st, err = self.read_state()
+        if st is None:
+            raise WebError(err or "state.json unavailable")
+        comp = next(
+            (c for c in components.list_components(st) if c.kind == kind and c.name == name), None
+        )
+        if comp is None or comp.status != "installed":
+            raise WebError(
+                f"{components.label_of(cast(components.Kind, kind), name)} is not installed"
+            )
+
+        key = (kind, name, action_id)
+        with self._lock:
+            run = self._runs.get(key)
+            if run is not None and run.alive():
+                self._result = ActionResult(
+                    title=action.label,
+                    output="".join(run.output),
+                    url=run.url,
+                    link_label=action.link_label,
+                )
+                return f"{action.label}: already running — the link is below."
+            self._notes.pop(key, None)
+            argv = [part.format(host=host) for part in action.argv]
+            try:
+                proc = self.action_spawn(argv)
+            except (OSError, subprocess.SubprocessError) as e:
+                raise WebError(f"cannot run {' '.join(argv)}: {e}") from e
+            run = ActionRun(proc=proc, output=deque(maxlen=20))
+            self._runs[key] = run
+        _read_until_link(run, action.link_scheme, ACTION_LINK_TIMEOUT)
+        output = "".join(run.output)
+        with self._lock:
+            self._result = ActionResult(
+                title=action.label, output=output, url=run.url, link_label=action.link_label
+            )
+        if run.url:
+            return f"{action.label}: open the link below to finish."
+        with self._lock:
+            del self._runs[key]
+        # No link: either it died (reap it for the exit code — stdout can close
+        # a moment before the process does) or it is stuck and we stop it.
+        try:
+            run.proc.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            run.proc.terminate()
+        if run.proc.returncode is None:
+            raise WebError(f"{action.label}: no link after {ACTION_LINK_TIMEOUT:.0f}s")
+        raise WebError(f"{action.label} failed (exit {run.proc.returncode})")
+
+    def action_state(self, kind: str, name: str, action_id: str) -> tuple[str, str]:
+        """(pending link, note) for one action — ("", "") when it never ran.
+
+        Reaps a finished run, turning it into the note the page shows on the
+        next render: no JavaScript here, the operator reloads to see the end.
+        """
+        key = (kind, name, action_id)
+        with self._lock:
+            run = self._runs.get(key)
+            if run is None:
+                return "", self._notes.get(key, "")
+            if run.alive():
+                return run.url, ""
+            del self._runs[key]
+            if run.proc.returncode == 0:
+                note = "Done."
+            else:
+                detail = " ".join(line.strip() for line in run.output if line.strip())[-200:]
+                note = f"Failed (exit {run.proc.returncode}). {detail}".strip()
+            self._notes[key] = note
+            return "", note
+
+    def pop_action_result(self) -> ActionResult | None:
+        """The last action's output, once: the modal shows it and it is gone."""
+        with self._lock:
+            result, self._result = self._result, None
+            return result
 
     def start_upgrade(self) -> str:
         """Start the odio-upgrade user unit (= `sudo odioctl upgrade apply --progress`)."""
@@ -254,7 +420,50 @@ _STATUS_UI = {
 }
 
 
-def _component_row(c: components.Component, render: Render, child: bool) -> str:
+ActionState = Callable[[str, str, str], tuple[str, str]]
+
+
+def _component_actions(
+    c: components.Component, render: Render, state_of: ActionState
+) -> tuple[str, str]:
+    """(buttons, notes) for one component's catalog actions.
+
+    Offered only once the component is installed — the command it runs ships
+    with the package. Each pending link (and the outcome of the last run) is
+    rendered under the row, next to what it belongs to.
+    """
+    if not c.actions or c.status != "installed":
+        return "", ""
+    buttons: list[str] = []
+    notes: list[str] = []
+    for a in c.actions:
+        buttons.append(
+            render(
+                "component_action_run.html",
+                kind=_e(c.kind),
+                name=_e(c.name),
+                action=_e(a.id),
+                button=_e(a.label),
+            )
+        )
+        url, note = state_of(c.kind, c.name, a.id)
+        if url:
+            notes.append(
+                render(
+                    "component_action_link.html",
+                    url=_e(url),
+                    label=_e(a.link_label),
+                    note=_e(a.link_note or "started"),
+                )
+            )
+        elif note:
+            notes.append(render("component_action_note.html", note=_e(f"{a.label}: {note}")))
+    return "".join(buttons), "".join(notes)
+
+
+def _component_row(
+    c: components.Component, render: Render, child: bool, state_of: ActionState
+) -> str:
     chip, button = _STATUS_UI[c.status]
     action = render(
         "component_action.html",
@@ -263,6 +472,7 @@ def _component_row(c: components.Component, render: Render, child: bool) -> str:
         enabled="0" if c.enabled else "1",
         button=button,
     )
+    runs, notes = _component_actions(c, render, state_of)
     return render(
         "component_row.html",
         child=" child" if child else "",
@@ -271,10 +481,14 @@ def _component_row(c: components.Component, render: Render, child: bool) -> str:
         status=_e(c.status),
         chip=chip,
         action=action,
+        runs=runs,
+        notes=notes,
     )
 
 
-def _components_section(st: state.State | None, err: str | None, render: Render) -> str:
+def _components_section(
+    st: state.State | None, err: str | None, render: Render, state_of: ActionState
+) -> str:
     if st is None:
         return _section("Components", _banner("err", f"state.json: {err}"))
     comps = components.list_components(st)
@@ -296,9 +510,11 @@ def _components_section(st: state.State | None, err: str | None, render: Render)
             infra.append(r.label)
             continue
         rows = rows_by_group.setdefault(r.group, [])
-        rows.append(_component_row(r, render, False))
-        rows.extend(_component_row(f, render, True) for f in by_parent.get(r.name, []))
-    rows_by_group[components.GROUPS[-1]].extend(_component_row(f, render, False) for f in orphans)
+        rows.append(_component_row(r, render, False, state_of))
+        rows.extend(_component_row(f, render, True, state_of) for f in by_parent.get(r.name, []))
+    rows_by_group[components.GROUPS[-1]].extend(
+        _component_row(f, render, False, state_of) for f in orphans
+    )
     groups = "".join(
         render("component_group.html", title=_e(title), rows="".join(rows))
         for title, rows in rows_by_group.items()
@@ -395,11 +611,32 @@ def _upgrade_section(report: check.UpgradeReport | None, render: Render, ui_url:
     )
 
 
+def _modal(result: ActionResult | None, render: Render) -> str:
+    """The action's output, over the page. Plain HTML: no JS anywhere, so it is
+    the POST response that carries it and `Close` is a link back to the page."""
+    if result is None:
+        return ""
+    link = (
+        render("modal_link.html", url=_e(result.url), label=_e(result.link_label))
+        if result.url
+        else ""
+    )
+    return render(
+        "modal.html",
+        title=_e(result.title),
+        output=_e(result.output.strip() or "(no output)"),
+        link=link,
+    )
+
+
 def render_page(services: Services, *, message: str = "", error: str = "", host: str = "") -> str:
     st, err = services.read_state()
     d = services.dac_status()
     render = _renderer(services.token)
-    ui_url = f"http://{host or socket.gethostname()}:{ODIO_UI_PORT}/ui"
+    # The Host header when the browser gave one (that name reaches the box), the
+    # box's own hostname otherwise — same address for the odio-ui link and ssh.
+    hostname = host or socket.gethostname()
+    ui_url = f"http://{hostname}:{ODIO_UI_PORT}/ui"
     version_badge = ""
     if st is not None:
         version_badge = _render("version_badge.html", odios=_e(st["odios"]))
@@ -412,9 +649,10 @@ def render_page(services: Services, *, message: str = "", error: str = "", host:
         hostname=_e(socket.gethostname()),
         version_badge=version_badge,
         banners="".join(banners),
-        components=_components_section(st, err, render),
+        components=_components_section(st, err, render, services.action_state),
         upgrade=_upgrade_section(services.upgrade_report(), render, ui_url),
         dac=_dac_section(d, render),
+        modal=_modal(services.pop_action_result(), render),
     )
 
 
@@ -424,13 +662,21 @@ PAGE_PATHS = frozenset({"/", "/index.html"})
 STATIC_PREFIX = "/static/"
 
 
-def _action_components(services: Services, form: dict[str, str]) -> str:
+def _action_components(services: Services, form: dict[str, str], _host: str) -> str:
     return services.set_component(
         form.get("kind", ""), form.get("name", ""), form.get("enabled") == "1"
     )
 
 
-def _action_dac(services: Services, form: dict[str, str]) -> str:
+def _action_component_action(services: Services, form: dict[str, str], host: str) -> str:
+    # `host` is the name the browser reached the box by: it becomes the OAuth
+    # callback host, so the redirect lands here and not on the box's loopback.
+    return services.run_action(
+        form.get("kind", ""), form.get("name", ""), form.get("action", ""), host
+    )
+
+
+def _action_dac(services: Services, form: dict[str, str], _host: str) -> str:
     dac_id = form.get("id", "")
     if not dac_id:  # an empty select is not an unset — that is /dac/unset
         raise WebError("no DAC selected")
@@ -438,11 +684,12 @@ def _action_dac(services: Services, form: dict[str, str]) -> str:
 
 
 # The POST routes; ACTION_PATHS is derived so routing and dispatch cannot drift.
-ACTIONS: dict[str, Callable[[Services, dict[str, str]], str]] = {
+ACTIONS: dict[str, Callable[[Services, dict[str, str], str], str]] = {
     "/components": _action_components,
+    "/components/action": _action_component_action,
     "/dac": _action_dac,
-    "/dac/unset": lambda services, _form: services.set_dac(None),
-    "/upgrade": lambda services, _form: services.start_upgrade(),
+    "/dac/unset": lambda services, _form, _host: services.set_dac(None),
+    "/upgrade": lambda services, _form, _host: services.start_upgrade(),
 }
 ACTION_PATHS = frozenset(ACTIONS)
 
@@ -537,7 +784,7 @@ class Handler(BaseHTTPRequestHandler):
         if self._reject_path(path, "POST"):
             return
         try:
-            msg = ACTIONS[path](self.services, self._read_form())
+            msg = ACTIONS[path](self.services, self._read_form(), self._host())
         except TokenError as e:
             self._send_status(HTTPStatus.FORBIDDEN, f"<p>{_e(e)}</p>")
             return
