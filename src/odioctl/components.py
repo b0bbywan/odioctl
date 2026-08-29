@@ -7,6 +7,12 @@ install it on the next upgrade — that's how a role added by a newer release
 self-installs. Toggling here only edits those lists; nothing is installed
 or removed until `odioctl upgrade apply` runs.
 
+Opt-in roles (`RoleInfo.default_install=False`, e.g. qbzd) invert that:
+install.sh asks `[y/N]`, so a name in neither list means *off*. Enabling one
+records it in `roles` with an empty version — that is what makes
+derive_install_env emit the explicit `INSTALL_X=Y`; the next write_state.yml
+replaces the placeholder with the version actually installed.
+
 The catalog below is advisory (labels, packages, feature→role parent). Any
 name present in state.json is accepted even if unknown here, so a role that
 odios adds later never gets blocked by a stale odioctl.
@@ -33,6 +39,7 @@ class RoleInfo:
     description: str  # one line, what it does
     group: str
     package: str | None = None
+    default_install: bool = True  # False = install.sh asks [y/N]; see module docstring
 
 
 @dataclass(frozen=True)
@@ -75,6 +82,13 @@ ROLE_CATALOG: dict[str, RoleInfo] = {
     ),
     "spotifyd": RoleInfo(
         "Spotify Connect", "Spotify Connect receiver (spotifyd)", "Streaming", "spotifyd"
+    ),
+    "qbzd": RoleInfo(
+        "Qobuz Connect",
+        "Qobuz Connect endpoint (qbzd, alpha — log in with `qbzd setup`)",
+        "Streaming",
+        "qbzd",
+        default_install=False,
     ),
     "snapclient": RoleInfo("Snapcast", "Multi-room audio client", "Streaming", "snapclient"),
     "upmpdcli": RoleInfo(
@@ -125,11 +139,23 @@ class Component:
         return d
 
 
+# Version stored for an opt-in role enabled here but not installed yet: `roles`
+# membership is what makes derive_install_env emit INSTALL_X=Y, and the empty
+# string keeps it out of the version comparisons (`_role_up_to_date`,
+# `_compute_role_upgrades`) until install.sh writes the real one.
+REQUESTED_VERSION = ""
+
+
 def _role_status(st: State, name: str) -> Status:
-    if name in st["roles"]:
+    if st["roles"].get(name):
         return "installed"
+    if name in st["roles"]:
+        return "default"  # opted in here, installs on the next apply
     if name in st["roles_excluded"]:
         return "excluded"
+    info = ROLE_CATALOG.get(name)
+    if info and not info.default_install:
+        return "excluded"  # install.sh answers N: neither list means off, not default
     return "default"
 
 
@@ -160,7 +186,7 @@ def list_components(st: State) -> list[Component]:
                 description=info.description if info else "",
                 group=info.group if info else GROUPS[-1],
                 status=_role_status(st, name),
-                installed_version=st["roles"].get(name),
+                installed_version=st["roles"].get(name) or None,
                 parent=None,
                 toggleable=name not in INFRA_ROLES,
             )
@@ -197,6 +223,10 @@ def set_component(st: State, kind: Kind, name: str, enabled: bool) -> State:
     excluded list, so leaving it in `roles` would win. Enabling only clears
     the exclusion — install.sh's default Y (and no RUN_X=N since the role is
     no longer in `roles`) makes the next apply install it in full.
+
+    Enabling an opt-in role (install.sh asks [y/N]) also records it in `roles`
+    with REQUESTED_VERSION, since clearing the exclusion would otherwise leave
+    install.sh answering N for it.
     """
     if kind not in ("role", "feature"):
         raise ComponentError(f"unknown component kind {kind!r}")
@@ -219,6 +249,9 @@ def set_component(st: State, kind: Kind, name: str, enabled: bool) -> State:
         excluded = set(new["roles_excluded"])
         if enabled:
             excluded.discard(name)
+            info = ROLE_CATALOG.get(name)
+            if info and not info.default_install and name not in new["roles"]:
+                new["roles"][name] = REQUESTED_VERSION
         else:
             new["roles"].pop(name, None)
             excluded.add(name)
@@ -245,7 +278,9 @@ def pending_components(st: State, available_roles: set[str] | None = None) -> li
     """Components that the next `upgrade apply` would install: toggleable roles in
     "default" status (not installed, not excluded) that the target release ships —
     `available_roles` is the manifest's role set, the catalog when unknown — plus
-    "default" features whose parent role is installed or pending.
+    "default" features whose parent role is installed or pending. An opt-in role
+    only reaches "default" once it has been enabled here, so it is pending then
+    and never before.
 
     Disabling is not a pending change: install.sh just skips the role (nothing is
     uninstalled), so there is nothing to apply.

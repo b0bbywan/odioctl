@@ -50,6 +50,15 @@ class ComputeRoleUpgradesTests(unittest.TestCase):
         )
         self.assertEqual(upgrades, [])
 
+    def test_role_awaiting_its_first_install_is_excluded(self):
+        # components.REQUESTED_VERSION: enabled in the UI, never installed — it
+        # belongs to pending_components, not to the motd role delta.
+        upgrades = check._compute_role_upgrades(
+            make_state(roles={"qbzd": ""}),
+            self._manifest({"qbzd": "2026.9.0b1"}),
+        )
+        self.assertEqual(upgrades, [])
+
     def test_results_are_sorted_alphabetically(self):
         upgrades = check._compute_role_upgrades(
             make_state(roles={"zzz": "2026.4.0", "aaa": "2026.4.0"}),
@@ -109,6 +118,23 @@ class BuildUpgradesReportTests(unittest.TestCase):
             roles_excluded=["spotifyd"],
         )
         self.assertEqual(check._build_upgrades_report(excluded, man)["pending_components"], [])
+
+    def test_opt_in_role_only_goes_pending_once_enabled(self):
+        man: Manifest = {
+            "odios": "2026.9.0b1",
+            "roles": {"mpd": "2026.9.0b1", "qbzd": "2026.9.0b1"},
+        }
+        off = make_state(odios="2026.9.0b1", roles={"mpd": "2026.9.0b1"}, features=["mympd"])
+        self.assertFalse(check._build_upgrades_report(off, man)["upgrade_available"])
+        enabled = make_state(
+            odios="2026.9.0b1",
+            roles={"mpd": "2026.9.0b1", "qbzd": ""},
+            features=["mympd"],
+        )
+        report = check._build_upgrades_report(enabled, man)
+        self.assertTrue(report["upgrade_available"])
+        self.assertEqual(report["pending_components"], ["role:qbzd"])
+        self.assertEqual(report["roles"], [])  # motd delta untouched
 
     def test_full_manifest_is_cached_alongside_delta(self):
         # `roles` stays delta-only (consumed by odio-motd in the {name,

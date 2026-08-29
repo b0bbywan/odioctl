@@ -5,8 +5,14 @@ import tempfile
 import unittest
 
 from odioctl import cli, components
+from odioctl.manifest import Manifest
+from odioctl.state import State
 from odioctl.upgrade import apply
 from tests._helpers import make_state, write_state
+
+
+def role(st: State, name: str) -> components.Component:
+    return next(c for c in components.list_components(st) if c.kind == "role" and c.name == name)
 
 
 class ListComponentsTests(unittest.TestCase):
@@ -95,6 +101,74 @@ class SetComponentTests(unittest.TestCase):
         st = make_state(roles={"newthing": "1"})
         new = components.set_component(st, "role", "newthing", False)
         self.assertEqual(new["roles_excluded"], ["newthing"])
+
+
+class OptInRoleTests(unittest.TestCase):
+    """Roles install.sh asks [y/N] for (qbzd): state must carry the Y explicitly."""
+
+    def test_catalog_marks_qbzd_opt_in(self):
+        self.assertFalse(components.ROLE_CATALOG["qbzd"].default_install)
+        self.assertTrue(components.ROLE_CATALOG["spotifyd"].default_install)
+
+    def test_absent_from_both_lists_reads_as_off(self):
+        # A box installed before qbzd existed has it in neither list. install.sh
+        # would answer N, so the row must not promise an install (nor go pending).
+        st = make_state(roles={"mpd": "1"}, features=["mympd"])
+        c = role(st, "qbzd")
+        self.assertEqual(c.status, "excluded")
+        self.assertFalse(c.enabled)
+        self.assertEqual(components.pending_components(st, {"mpd", "qbzd"}), [])
+
+    def test_enable_records_an_explicit_install_y(self):
+        st = make_state(roles={"mpd": "1"}, roles_excluded=["qbzd"])
+        new = components.set_component(st, "role", "qbzd", True)
+        self.assertEqual(new["roles_excluded"], [])
+        self.assertEqual(new["roles"]["qbzd"], components.REQUESTED_VERSION)
+        # clearing the exclusion is not enough here — install.sh's default is N
+        self.assertEqual(apply.derive_install_env(new)["INSTALL_QBZD"], "Y")
+        c = role(new, "qbzd")
+        self.assertEqual(c.status, "default")
+        self.assertTrue(c.enabled)
+        self.assertIsNone(c.installed_version)  # placeholder version never shown
+        self.assertIn("role:qbzd", components.pending_components(new, {"mpd", "qbzd"}))
+        self.assertNotIn("qbzd", st["roles"])  # original untouched
+
+    def test_requested_role_is_not_skipped_by_the_smart_upgrade(self):
+        new = components.set_component(make_state(), "role", "qbzd", True)
+        man: Manifest = {"odios": "2026.9.0b1", "roles": {"qbzd": "2026.9.0b1"}}
+        env = apply.derive_run_env(new, man, apply.derive_install_env(new))
+        self.assertNotIn("RUN_QBZD", env)
+
+    def test_enable_is_idempotent_and_never_clobbers_a_real_version(self):
+        once = components.set_component(make_state(), "role", "qbzd", True)
+        self.assertEqual(
+            components.set_component(once, "role", "qbzd", True)["roles"], {"qbzd": ""}
+        )
+        installed = make_state(roles={"qbzd": "2026.9.0b1"})
+        again = components.set_component(installed, "role", "qbzd", True)
+        self.assertEqual(again["roles"]["qbzd"], "2026.9.0b1")
+
+    def test_disable_after_enable_round_trips(self):
+        enabled = components.set_component(make_state(), "role", "qbzd", True)
+        back = components.set_component(enabled, "role", "qbzd", False)
+        self.assertNotIn("qbzd", back["roles"])
+        self.assertEqual(back["roles_excluded"], ["qbzd"])
+        self.assertEqual(apply.derive_install_env(back)["INSTALL_QBZD"], "N")
+        self.assertEqual(role(back, "qbzd").status, "excluded")
+
+    def test_installed_qbzd_looks_like_any_other_role(self):
+        st = make_state(roles={"qbzd": "2026.9.0b1"})
+        c = role(st, "qbzd")
+        self.assertEqual(c.status, "installed")
+        self.assertEqual(c.installed_version, "2026.9.0b1")
+        self.assertEqual(components.pending_components(st, {"qbzd"}), [])
+
+    def test_default_y_roles_still_only_clear_the_exclusion(self):
+        new = components.set_component(
+            make_state(roles_excluded=["spotifyd"]), "role", "spotifyd", True
+        )
+        self.assertNotIn("spotifyd", new["roles"])
+        self.assertNotIn("INSTALL_SPOTIFYD", apply.derive_install_env(new))
 
 
 class ComponentsCliTests(unittest.TestCase):
