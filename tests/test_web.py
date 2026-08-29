@@ -208,6 +208,36 @@ class ComponentFormTests(WebTestCase):
         self.assertIn(">Apply now<", body)
         self.assertIn('href="http://127.0.0.1:8018/ui"', body)
 
+    def test_enable_opt_in_role_writes_an_explicit_yes(self):
+        self.manifest = {
+            "odios": "2026.5.0",
+            "roles": {"mpd": "1", "common": "1", "qbzd": "2026.9.0b1"},
+        }
+        # qbzd is in neither state list: off, and the button offers to enable it.
+        _, body = self.get()
+        self.assertIn("Qobuz Connect", body)
+        self.assertIn(
+            'name="name" value="qbzd"><input type="hidden" name="enabled" value="1">'
+            '<button class="small" type="submit">Enable</button>',
+            body,
+        )
+        code, body = self.post("/components", {"kind": "role", "name": "qbzd", "enabled": "1"})
+        self.assertEqual(code, 200)
+        # roles carries the explicit Y (empty version until install.sh writes one)
+        self.assertEqual(self.state()["roles"]["qbzd"], "")
+        self.assertEqual(self.state()["roles_excluded"], [])
+        self.assertIn("Will install on next upgrade", body)
+        self.assertIn("<li>install Qobuz Connect</li>", body)
+        with open(self.upgrades) as f:
+            report = json.load(f)
+        self.assertTrue(report["upgrade_available"])
+        self.assertEqual(report["pending_components"], ["role:qbzd"])
+        self.assertEqual(report["roles"], [])
+        code, _ = self.post("/components", {"kind": "role", "name": "qbzd", "enabled": "0"})
+        self.assertEqual(code, 200)
+        self.assertNotIn("qbzd", self.state()["roles"])
+        self.assertEqual(self.state()["roles_excluded"], ["qbzd"])
+
     def test_disable_feature(self):
         code, _ = self.post("/components", {"kind": "feature", "name": "tidal", "enabled": "0"})
         self.assertEqual(code, 200)

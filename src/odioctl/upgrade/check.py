@@ -68,6 +68,10 @@ def check_from_args(ns: argparse.Namespace) -> int:
 def _compute_role_upgrades(st: State, man: Manifest) -> list[RoleUpgrade]:
     upgrades: list[RoleUpgrade] = []
     for role, installed in st["roles"].items():
+        # No version = enabled here, not installed yet: that's a pending
+        # component, not a role upgrade (components.REQUESTED_VERSION).
+        if not installed:
+            continue
         available = man["roles"].get(role)
         if available and parse_version(available) > parse_version(installed):
             upgrades.append({"name": role, "installed": installed, "available": available})
