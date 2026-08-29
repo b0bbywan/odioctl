@@ -10,10 +10,11 @@ import unittest
 import urllib.error
 import urllib.parse
 import urllib.request
+from dataclasses import replace
 from typing import Any
 from unittest.mock import patch
 
-from odioctl import dac, manifest
+from odioctl import components, dac, manifest
 from odioctl.web import server
 from tests._helpers import make_state, write_state
 
@@ -69,7 +70,32 @@ class WebTestCase(unittest.TestCase):
             rc = cli.main(args)
             return subprocess.CompletedProcess(args, rc, stdout="ok", stderr="")
 
-        self.services = server.Services(cfg, privileged_run=fake_privileged, user_run=fake_user_run)
+        # Component actions run a real child process (a shell stand-in for
+        # `qbzd login`): the URL is lifted off its stdout while it keeps running.
+        self.spawns: list[list[str]] = []
+        self.procs: list[subprocess.Popen[str]] = []
+        self.script = "echo 'paste this URL:'; echo '  https://qobuz.test/oauth?id=1'; sleep 30"
+
+        def fake_spawn(argv: list[str]) -> subprocess.Popen[str]:
+            self.spawns.append(argv)
+            proc = subprocess.Popen(
+                ["sh", "-c", self.script],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL,
+                text=True,
+                bufsize=1,
+            )
+            self.procs.append(proc)
+            return proc
+
+        self.addCleanup(self._kill_children)
+        self.services = server.Services(
+            cfg,
+            privileged_run=fake_privileged,
+            user_run=fake_user_run,
+            action_spawn=fake_spawn,
+        )
         self.srv = server.make_server(cfg, self.services)
         self.thread = threading.Thread(
             target=self.srv.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True
@@ -104,6 +130,22 @@ class WebTestCase(unittest.TestCase):
                 return resp.status, resp.read().decode()
         except urllib.error.HTTPError as e:
             return e.code, e.read().decode()
+
+    def _kill_children(self) -> None:
+        for proc in self.procs:
+            if proc.poll() is None:
+                proc.kill()
+            proc.wait()
+
+    def write_roles(self, **roles: str) -> None:
+        write_state(
+            self.tmp.name,
+            make_state(
+                roles={"mpd": "1", "common": "1", **roles},
+                features=["tidal", "mympd"],
+                target_user="alice",
+            ),
+        )
 
     def state(self) -> dict[str, Any]:
         with open(self.state_path) as f:
@@ -278,6 +320,148 @@ class ComponentFormTests(WebTestCase):
             body = resp.read().decode()
         self.assertIn("expected a form submission", body)
         self.assertEqual(self.state()["roles_excluded"], [])
+
+
+# A catalog action of the test's own: the machinery must not depend on which
+# components declare one today. `mpd` is installed in the base state, `spotifyd`
+# is not — same action on both covers the installed/not-installed split.
+TEST_ACTION = components.Action(
+    id="login",
+    label="Log in",
+    description="Sign in to the service",
+    argv=("acmed", "login", "--callback-host", "{host}"),
+    link_label="Open the sign-in page",
+    link_note="valid 5 minutes",
+)
+
+
+def with_test_actions() -> Any:
+    return patch.dict(
+        components.ROLE_CATALOG,
+        {
+            name: replace(components.ROLE_CATALOG[name], actions=(TEST_ACTION,))
+            for name in ("mpd", "spotifyd")
+        },
+    )
+
+
+class ComponentActionTests(WebTestCase):
+    """The box runs the command for the operator — no shell on the box needed."""
+
+    def setUp(self):
+        super().setUp()
+        patcher = with_test_actions()
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def post_login(self, **over: str) -> tuple[int, str]:
+        form = {"kind": "role", "name": "mpd", "action": "login"} | over
+        return self.post("/components/action", form)
+
+    def test_button_needs_an_installed_component(self):
+        _, body = self.get("/")
+        # mpd is installed, spotifyd is not — one button, on the right row
+        self.assertEqual(body.count('action="/components/action"'), 1)
+        self.assertIn(
+            'name="name" value="mpd"><input type="hidden" name="action" value="login">', body
+        )
+        self.assertEqual(self.spawns, [])  # rendering a button starts nothing
+
+    def test_button_sits_under_the_description_not_in_the_status_pair(self):
+        _, body = self.get("/")
+        # its own line in the left column, right after the description
+        self.assertIn(
+            '<small>Music Player Daemon: local library, CDs, web radios</small><form class="run"',
+            body,
+        )
+        # nothing wedged between the status chip and the enable/disable button
+        self.assertIn(
+            '<span class="chip installed">Installed</span>'
+            '<form method="post" action="/components">',
+            body,
+        )
+
+    def test_link_is_lifted_off_stdout_and_shown(self):
+        code, body = self.post_login()
+        self.assertEqual(code, 200)
+        # the callback host is the name the browser reached the box by
+        self.assertEqual(self.spawns, [["acmed", "login", "--callback-host", "127.0.0.1"]])
+        self.assertIn('href="https://qobuz.test/oauth?id=1"', body)
+        self.assertIn(">Open the sign-in page</a>", body)
+        self.assertIn("Log in: open the link below to finish.", body)
+        # the process keeps waiting for the callback, so a plain reload keeps it
+        _, body = self.get("/")
+        self.assertIn('href="https://qobuz.test/oauth?id=1"', body)
+        self.assertIsNone(self.procs[0].poll())
+
+    def test_second_click_reuses_the_running_command(self):
+        self.post_login()
+        code, body = self.post_login()
+        self.assertEqual(code, 200)
+        self.assertEqual(len(self.spawns), 1)
+        self.assertIn("already running", body)
+        self.assertIn('href="https://qobuz.test/oauth?id=1"', body)
+
+    def test_finished_run_becomes_a_note_on_the_next_render(self):
+        self.script = "echo https://qobuz.test/oauth?id=2; exit 0"
+        # the banner is the same either way; the row races the exit, so only the
+        # state after the process is reaped is asserted
+        _, body = self.post_login()
+        self.assertIn("Log in: open the link below to finish.", body)
+        self.procs[0].wait(timeout=5)
+        _, body = self.get("/")
+        self.assertIn("Log in: Done.", body)
+        self.assertNotIn("https://qobuz.test/oauth?id=2", body)
+
+    def test_failure_shows_the_output_in_the_modal(self):
+        self.script = "echo 'no app id'; exit 3"
+        code, body = self.post_login()
+        self.assertEqual(code, 200)
+        self.assertIn('class="banner err">Log in failed (exit 3)', body)
+        self.assertIn('role="dialog"', body)
+        self.assertIn("<pre>no app id</pre>", body)
+        self.assertNotIn("qobuz.test", body)
+
+    def test_the_modal_carries_the_output_and_is_gone_on_reload(self):
+        _, body = self.post_login()
+        self.assertIn('role="dialog"', body)
+        # the command's own output, verbatim, plus the link as a button
+        self.assertIn("paste this URL:", body)
+        self.assertIn('<a class="btn primary" href="https://qobuz.test/oauth?id=1"', body)
+        self.assertIn('<a class="btn" href="/">Close</a>', body)
+        # Close is a plain link back to the page: the modal is shown once, the
+        # pending link on the component row is what stays.
+        _, body = self.get("/")
+        self.assertNotIn('role="dialog"', body)
+        self.assertIn('href="https://qobuz.test/oauth?id=1"', body)
+
+    def test_unknown_action_or_component_never_spawns(self):
+        for form in (
+            {"action": "rm -rf /"},
+            {"action": ""},
+            {"name": "snapclient"},  # a component with no actions
+            {"kind": "feature"},
+            {"kind": "wat"},
+        ):
+            code, body = self.post_login(**form)
+            self.assertEqual(code, 200)
+            self.assertIn('class="banner err"', body)
+        self.assertEqual(self.spawns, [])
+
+    def test_component_not_installed_is_refused(self):
+        code, body = self.post_login(name="spotifyd")
+        self.assertEqual(code, 200)
+        self.assertIn("Spotify Connect is not installed", body)
+        self.assertEqual(self.spawns, [])
+
+    def test_missing_token_is_403_and_never_spawns(self):
+        code, _ = self.post(
+            "/components/action",
+            {"kind": "role", "name": "mpd", "action": "login"},
+            token=False,
+        )
+        self.assertEqual(code, 403)
+        self.assertEqual(self.spawns, [])
 
 
 class UpgradeTests(WebTestCase):

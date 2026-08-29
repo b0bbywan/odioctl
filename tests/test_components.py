@@ -3,6 +3,8 @@ import io
 import json
 import tempfile
 import unittest
+from dataclasses import replace
+from unittest.mock import patch
 
 from odioctl import cli, components
 from odioctl.manifest import Manifest
@@ -101,6 +103,71 @@ class SetComponentTests(unittest.TestCase):
         st = make_state(roles={"newthing": "1"})
         new = components.set_component(st, "role", "newthing", False)
         self.assertEqual(new["roles_excluded"], ["newthing"])
+
+
+class ActionTests(unittest.TestCase):
+    """Catalog commands the box runs for the user (the web UI executes them).
+
+    Exercised against a catalog entry of its own: the mechanism must not
+    depend on which components happen to declare an action today.
+    """
+
+    ACTION = components.Action(
+        id="login",
+        label="Log in",
+        description="Sign in to the service",
+        argv=("acmed", "login", "--callback-host", "{host}"),
+        link_label="Open the sign-in page",
+    )
+
+    def with_action(self, name: str = "mpd"):
+        info = replace(components.ROLE_CATALOG[name], actions=(self.ACTION,))
+        return patch.dict(components.ROLE_CATALOG, {name: info})
+
+    def test_host_is_the_only_thing_a_request_fills_in(self):
+        self.assertEqual(
+            [p.format(host="odio.local") for p in self.ACTION.argv],
+            ["acmed", "login", "--callback-host", "odio.local"],
+        )
+
+    def test_components_without_actions_have_an_empty_tuple(self):
+        self.assertEqual(role(make_state(roles={"mpd": "1"}), "mpd").actions, ())
+        st = make_state(roles={"newthing": "1"})  # unknown to the catalog
+        self.assertEqual(role(st, "newthing").actions, ())
+
+    def test_the_catalog_action_reaches_the_component(self):
+        with self.with_action():
+            self.assertEqual(role(make_state(roles={"mpd": "1"}), "mpd").actions, (self.ACTION,))
+
+    def test_find_action_only_resolves_catalog_entries(self):
+        with self.with_action():
+            self.assertIs(components.find_action("role", "mpd", "login"), self.ACTION)
+            self.assertIsNone(components.find_action("role", "mpd", "rm"))
+            self.assertIsNone(components.find_action("role", "spotifyd", "login"))
+            self.assertIsNone(components.find_action("feature", "mpd", "login"))
+            self.assertIsNone(components.find_action("role", "nope", "login"))
+
+    def test_to_dict_serialises_the_actions(self):
+        with self.with_action():
+            d = role(make_state(roles={"mpd": "1"}), "mpd").to_dict()
+        (login,) = json.loads(json.dumps(d))["actions"]
+        self.assertEqual(login["id"], "login")
+        self.assertEqual(login["argv"], ["acmed", "login", "--callback-host", "{host}"])
+
+    def test_table_shows_the_actions_of_an_installed_component(self):
+        out = io.StringIO()
+        with self.with_action(), contextlib.redirect_stdout(out):
+            components._print_table(components.list_components(make_state(roles={"mpd": "1"})))
+        self.assertIn("action: acmed login --callback-host {host}", out.getvalue())
+
+    def test_table_hides_the_actions_of_a_component_not_installed_yet(self):
+        # the command only exists on the box once the package is installed
+        for st in (make_state(roles_excluded=["mpd"]), make_state(roles={"mpd": ""})):
+            out = io.StringIO()
+            with self.with_action(), contextlib.redirect_stdout(out):
+                components._print_table(components.list_components(st))
+            self.assertIn("mpd", out.getvalue())
+            self.assertNotIn("action:", out.getvalue())
 
 
 class OptInRoleTests(unittest.TestCase):

@@ -13,9 +13,10 @@ records it in `roles` with an empty version — that is what makes
 derive_install_env emit the explicit `INSTALL_X=Y`; the next write_state.yml
 replaces the placeholder with the version actually installed.
 
-The catalog below is advisory (labels, packages, feature→role parent). Any
-name present in state.json is accepted even if unknown here, so a role that
-odios adds later never gets blocked by a stale odioctl.
+The catalog below is advisory (labels, packages, feature→role parent, the
+per-component actions the web UI offers). Any name present in state.json is
+accepted even if unknown here, so a role that odios adds later never gets
+blocked by a stale odioctl.
 """
 
 from __future__ import annotations
@@ -34,12 +35,36 @@ Status = Literal["installed", "excluded", "default"]
 
 
 @dataclass(frozen=True)
+class Action:
+    """A one-off command the box runs for the user, so no shell is needed.
+
+    `argv` is fixed here and never built from request input; `{host}` is
+    substituted with the address the browser reached the box by, so a login
+    callback comes back to this machine (`qbzd login --callback-host`).
+
+    These commands print a URL and then keep running until the user has
+    followed it (`qbzd login`: 300s deadline, one-shot listener on an ephemeral
+    port), so the web UI starts them, lifts the URL off stdout and shows it as
+    a link — it does not wait for them. Only for installed components.
+    """
+
+    id: str  # form value, unique per component
+    label: str  # button text
+    description: str  # one line: what the command does
+    argv: tuple[str, ...]
+    link_scheme: str = "https://"  # the stdout token to surface as a link
+    link_label: str = "Open this link"  # anchor text for that token
+    link_note: str = ""  # how long the operator has to follow it
+
+
+@dataclass(frozen=True)
 class RoleInfo:
     label: str  # product name the user knows
     description: str  # one line, what it does
     group: str
     package: str | None = None
     default_install: bool = True  # False = install.sh asks [y/N]; see module docstring
+    actions: tuple[Action, ...] = ()  # commands offered next to an installed component
 
 
 @dataclass(frozen=True)
@@ -48,6 +73,7 @@ class FeatureInfo:
     description: str
     package: str
     parent: str
+    actions: tuple[Action, ...] = ()
 
 
 # Display order of the web UI / `components list`; unknown roles go to the last group.
@@ -85,7 +111,7 @@ ROLE_CATALOG: dict[str, RoleInfo] = {
     ),
     "qbzd": RoleInfo(
         "Qobuz Connect",
-        "Qobuz Connect endpoint (qbzd, alpha — log in with `qbzd setup`)",
+        "Qobuz Connect endpoint (qbzd, alpha)",
         "Streaming",
         "qbzd",
         default_install=False,
@@ -128,6 +154,7 @@ class Component:
     installed_version: str | None
     parent: str | None
     toggleable: bool
+    actions: tuple[Action, ...]
 
     @property
     def enabled(self) -> bool:
@@ -189,6 +216,7 @@ def list_components(st: State) -> list[Component]:
                 installed_version=st["roles"].get(name) or None,
                 parent=None,
                 toggleable=name not in INFRA_ROLES,
+                actions=info.actions if info else (),
             )
         )
     for name in sorted(features, key=lambda n: _order(_FEATURE_ORDER, n)):
@@ -204,6 +232,7 @@ def list_components(st: State) -> list[Component]:
                 installed_version=None,
                 parent=finfo.parent if finfo else None,
                 toggleable=True,
+                actions=finfo.actions if finfo else (),
             )
         )
     return out
@@ -267,6 +296,17 @@ def set_component(st: State, kind: Kind, name: str, enabled: bool) -> State:
         new["features"] = sorted(active)
         new["features_excluded"] = sorted(excluded)
     return new
+
+
+def find_action(kind: Kind, name: str, action_id: str) -> Action | None:
+    """The catalog action `action_id` of a component, or None — the only way an
+    argv is resolved, so a request can never name a command of its own."""
+    info: RoleInfo | FeatureInfo | None = (
+        ROLE_CATALOG.get(name) if kind == "role" else FEATURE_CATALOG.get(name)
+    )
+    if info is None:
+        return None
+    return next((a for a in info.actions if a.id == action_id), None)
 
 
 def label_of(kind: Kind, name: str) -> str:
@@ -376,3 +416,6 @@ def _print_table(comps: list[Component]) -> None:
             lock = "" if c.toggleable else " [infra]"
             parent = f" ← {c.parent}" if c.parent else ""
             print(f"  {c.name:<16} {c.status:<10}{ver}{parent}{lock}")
+            # Only offered by the web UI, and only once the binaries are there.
+            for a in c.actions if c.status == "installed" else ():
+                print(f"      action: {' '.join(a.argv)} — {a.description}")

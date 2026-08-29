@@ -178,6 +178,53 @@ section h3 {
   font-size: 12px;
   color: var(--zinc-400);
 }
+/* An action's button sits under the description, not between the status chip
+   and the toggle: it belongs to the component, not to the enable/disable pair. */
+.card .content form.run {
+  display: inline-block;
+  margin: 14px 8px 2px 0;
+}
+
+/* Action output, over the page (no JS: the POST response carries it). */
+.scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.6);
+}
+.modal {
+  width: 100%;
+  max-width: 640px;
+  padding: 20px;
+  border-radius: 12px;
+  background: var(--zinc-800);
+  box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.6);
+}
+.modal h2 { margin: 0 0 12px; font-size: 18px; font-weight: 600; }
+.modal pre {
+  margin: 0 0 16px;
+  padding: 10px;
+  max-height: 40vh;
+  overflow: auto;
+  border-radius: 8px;
+  background: var(--zinc-900);
+  font-size: 12px;
+  color: var(--zinc-300);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* Component actions (components.Action): the link a started command printed. */
+.card .content small.action {
+  margin-top: 6px;
+  color: var(--zinc-300);
+}
+.card .content small.action a { color: var(--lime); }
+
 .card .meta {
   display: flex;
   flex-shrink: 0;
@@ -188,8 +235,8 @@ section h3 {
 ul.pending { margin: 0 0 14px; padding-left: 20px; font-size: 14px; color: var(--zinc-300); }
 ul.pending li { margin: 2px 0; }
 
-/* Controls (odio-ui .btn) */
-select, button {
+/* Controls (odio-ui .btn) — a.btn is the modal's link-shaped button */
+select, button, a.btn {
   font: inherit;
   font-size: 14px;
   padding: 8px 12px;
@@ -198,15 +245,16 @@ select, button {
   background: rgba(26, 42, 30, 0.5);
   color: var(--zinc-100);
 }
-button { cursor: pointer; transition: background-color 0.15s, transform 0.1s; }
-button:hover { background: var(--zinc-700); }
-button:active { transform: scale(0.95); }
-button.primary { background: var(--lime); color: #0d1410; font-weight: 600; }
-button.primary:hover { background: #6ccb2c; }
+button, a.btn { cursor: pointer; transition: background-color 0.15s, transform 0.1s; }
+button:hover, a.btn:hover { background: var(--zinc-700); }
+button:active, a.btn:active { transform: scale(0.95); }
+button.primary, a.btn.primary { background: var(--lime); color: #0d1410; font-weight: 600; }
+button.primary:hover, a.btn.primary:hover { background: #6ccb2c; }
+a.btn { display: inline-block; text-decoration: none; }
 button.small { padding: 5px 10px; font-size: 13px; }
 select { flex: 1 1 240px; min-width: 0; max-width: 100%; }
 form.row button { flex-shrink: 0; }
-select:focus, button:focus-visible { outline: 2px solid rgba(90, 184, 30, 0.5); outline-offset: 1px; }
+select:focus, button:focus-visible, a.btn:focus-visible { outline: 2px solid rgba(90, 184, 30, 0.5); outline-offset: 1px; }
 
 .row {
   display: flex;
