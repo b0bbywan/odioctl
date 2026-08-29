@@ -1,3 +1,15 @@
+odioctl (0.1.0~beta.2) unstable; urgency=medium
+
+  * components: qbzd (Qobuz Connect) is in the catalog. install.sh asks
+    [y/N] for it, so absent from both state lists means off, and enabling it
+    records the explicit INSTALL_QBZD=Y instead of relying on a default Y.
+  * components: a catalog entry can declare actions — commands the web UI
+    runs as the target user so the operator needs no shell on the box. The
+    output comes back in a modal, still without JavaScript. First one is
+    `qbzd login`, which hands over the Qobuz sign-in link.
+
+ -- Mathieu Réquillart <mathieu.requillart@gmail.com>  Sat, 29 Aug 2026 15:50:00 +0200
+
 odioctl (0.1.0~beta.1) unstable; urgency=medium
 
   * Initial release: `odioctl upgrade check|apply|verify` extracted from
