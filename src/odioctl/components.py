@@ -115,6 +115,16 @@ ROLE_CATALOG: dict[str, RoleInfo] = {
         "Streaming",
         "qbzd",
         default_install=False,
+        actions=(
+            Action(
+                id="login",
+                label="Log in to Qobuz",
+                description="Sign in to Qobuz — opens a Qobuz link, the box catches the callback",
+                argv=("qbzd", "login", "--callback-host", "{host}"),
+                link_label="Open the Qobuz sign-in page",
+                link_note="valid 5 minutes",
+            ),
+        ),
     ),
     "snapclient": RoleInfo("Snapcast", "Multi-room audio client", "Streaming", "snapclient"),
     "upmpdcli": RoleInfo(
