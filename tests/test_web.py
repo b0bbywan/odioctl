@@ -335,14 +335,22 @@ TEST_ACTION = components.Action(
 )
 
 
-def with_test_actions() -> Any:
-    return patch.dict(
-        components.ROLE_CATALOG,
-        {
-            name: replace(components.ROLE_CATALOG[name], actions=(TEST_ACTION,))
-            for name in ("mpd", "spotifyd")
-        },
-    )
+def with_test_actions() -> list[Any]:
+    """Put the action under test on mpd and spotifyd, and take the catalog's own
+    out of the way, so these tests count only what they installed themselves."""
+    return [
+        patch.dict(
+            components.ROLE_CATALOG,
+            {
+                name: replace(components.ROLE_CATALOG[name], actions=(TEST_ACTION,))
+                for name in ("mpd", "spotifyd")
+            },
+        ),
+        patch.dict(
+            components.FEATURE_CATALOG,
+            {name: replace(info, actions=()) for name, info in components.FEATURE_CATALOG.items()},
+        ),
+    ]
 
 
 class ComponentActionTests(WebTestCase):
@@ -350,9 +358,9 @@ class ComponentActionTests(WebTestCase):
 
     def setUp(self):
         super().setUp()
-        patcher = with_test_actions()
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        for patcher in with_test_actions():
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
     def post_login(self, **over: str) -> tuple[int, str]:
         form = {"kind": "role", "name": "mpd", "action": "login"} | over
@@ -412,6 +420,21 @@ class ComponentActionTests(WebTestCase):
         _, body = self.get("/")
         self.assertIn("Log in: Done.", body)
         self.assertNotIn("https://qobuz.test/oauth?id=2", body)
+
+    def test_what_the_command_prints_after_the_link_is_never_recorded(self):
+        # Past the link, a login helper prints the credential it just obtained
+        # (upmpdcli's Tidal one dumps the access and refresh tokens). Draining
+        # continues so the child never wedges on a full pipe; recording stops.
+        self.script = (
+            "echo 'paste this URL:'; echo 'https://qobuz.test/oauth?id=1'; "
+            'echo \'"refresh_token": "s3cr3t"\'; exit 4'
+        )
+        _, body = self.post_login()
+        self.assertNotIn("s3cr3t", body)
+        self.procs[0].wait(timeout=5)
+        _, body = self.get("/")
+        self.assertIn("Log in: Failed (exit 4).", body)
+        self.assertNotIn("s3cr3t", body)
 
     def test_failure_shows_the_output_in_the_modal(self):
         self.script = "echo 'no app id'; exit 3"
@@ -477,6 +500,33 @@ class QbzdLoginTests(WebTestCase):
         self.assertEqual(code, 200)
         self.assertEqual(self.spawns, [["qbzd", "login", "--callback-host", "127.0.0.1"]])
         self.assertIn(">Open the Qobuz sign-in page</a>", body)
+
+
+class TidalLoginTests(WebTestCase):
+    """The real catalog entry, end to end through the page."""
+
+    def test_login_button_spawns_the_helper_with_the_home_expanded(self):
+        _, body = self.get("/")
+        self.assertIn(">Log in to Tidal<", body)
+        code, body = self.post(
+            "/components/action", {"kind": "feature", "name": "tidal", "action": "login"}
+        )
+        self.assertEqual(code, 200)
+        creds = os.path.expanduser("~/.cache/upmpdcli/tidal/oauth2.credentials.json")
+        self.assertEqual(
+            self.spawns,
+            [
+                [
+                    "python3",
+                    "-u",
+                    "/usr/share/upmpdcli/cdplugins/tidal/get_credentials.py",
+                    "-f",
+                    creds,
+                ]
+            ],
+        )
+        self.assertNotIn("{home}", " ".join(self.spawns[0]))
+        self.assertIn(">Open the Tidal sign-in page</a>", body)
 
 
 class UpgradeTests(WebTestCase):

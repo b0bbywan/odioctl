@@ -123,19 +123,24 @@ def _read_until_link(run: ActionRun, scheme: str, timeout: float) -> None:
     """Drain the process output until it prints a link, EOF, or `timeout`.
 
     Keeps draining in the background afterwards: the child writes a few more
-    lines when the user follows the link, and a full pipe would wedge it.
+    lines when the user follows the link, and a full pipe would wedge it. It
+    stops *recording* there, though — what a login helper prints once the user
+    is through is the credential it just obtained (upmpdcli's Tidal helper
+    dumps the access and refresh tokens), and nothing that lands in `output`
+    is worth painting into a browser.
     """
     found = threading.Event()
 
     def drain() -> None:
         assert run.proc.stdout is not None
         for line in run.proc.stdout:
+            if run.url:
+                continue
             run.output.append(line)
-            if not run.url:
-                token = next((w for w in line.split() if w.startswith(scheme)), "")
-                if token:
-                    run.url = token
-                    found.set()
+            token = next((w for w in line.split() if w.startswith(scheme)), "")
+            if token:
+                run.url = token
+                found.set()
         found.set()  # EOF: nothing more is coming
 
     threading.Thread(target=drain, daemon=True).start()
@@ -274,7 +279,7 @@ class Services:
                 )
                 return f"{action.label}: already running — the link is below."
             self._notes.pop(key, None)
-            argv = [part.format(host=host) for part in action.argv]
+            argv = [part.format(host=host, home=os.path.expanduser("~")) for part in action.argv]
             try:
                 proc = self.action_spawn(argv)
             except (OSError, subprocess.SubprocessError) as e:
