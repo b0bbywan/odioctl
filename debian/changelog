@@ -1,3 +1,34 @@
+odioctl (0.1.0~beta.6) unstable; urgency=medium
+
+  * components: the Tidal login action runs `python3 -u`. get_credentials.py
+    block-buffers stdout when it is a pipe, so the login URL stayed in the
+    child while it waited for the user and the web UI showed "(no output)".
+  * web: an action's output stops being recorded once its link is printed —
+    past that point a login helper prints the credential it just obtained
+    (upmpdcli's dumps the Tidal access and refresh tokens), and none of that
+    belongs in a page. Draining continues, so the child never wedges.
+  * dac: the managed block resets `dtoverlay=` before `dtparam=audio=`. A
+    dtparam applies to the last overlay loaded above it, so from the end of
+    config.txt ours landed on vc4-kms-v3d instead of the base DTB:
+    snd_bcm2835 never loaded and onboard audio was a dummy output. Shipped
+    in beta.4, recorded here.
+
+ -- Mathieu Réquillart <mathieu.requillart@gmail.com>  Tue, 01 Sep 2026 14:00:00 +0200
+
+odioctl (0.1.0~beta.4) unstable; urgency=medium
+
+  * upgrade: `check` can target an odios pre-release, with `--version pr-84`
+    or ODIOCTL_ODIOS_VERSION in /etc/default/odioctl (read by the daily timer
+    and by `odioctl web`). Until now a box installed from a PR build compared
+    itself to the published manifest, which knows nothing of the roles that
+    build ships, so enabling one of them never went pending. Only a release
+    tag is accepted, never a URL, and `apply` re-validates the tag it reads
+    from upgrades.json before it reaches `curl … | bash`.
+  * components: the Tidal plugin offers its login as an action, running
+    upmpdcli's own get_credentials.py so the operator needs no shell.
+
+ -- Mathieu Réquillart <mathieu.requillart@gmail.com>  Tue, 01 Sep 2026 10:00:00 +0200
+
 odioctl (0.1.0~beta.3) unstable; urgency=medium
 
   * sudoers: grant a new `odioctl` system group instead of `odio`. `odio`
