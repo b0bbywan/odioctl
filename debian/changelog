@@ -1,3 +1,16 @@
+odioctl (0.1.0~beta.3) unstable; urgency=medium
+
+  * sudoers: grant a new `odioctl` system group instead of `odio`. `odio`
+    carries read/write on /var/lib/odio/state.json and odios also puts the
+    installing user in it, so keying passwordless root on it turned a
+    state-access group into a root group. The package creates `odioctl`
+    empty; odios adds only its target user.
+  * Upgrading an existing box needs that user added to the new group, and
+    the membership only reaches its systemd --user session on the next
+    login — until then odio-upgrade.service fails at sudo.
+
+ -- Mathieu Réquillart <mathieu.requillart@gmail.com>  Mon, 31 Aug 2026 12:00:00 +0200
+
 odioctl (0.1.0~beta.2) unstable; urgency=medium
 
   * components: qbzd (Qobuz Connect) is in the catalog. install.sh asks
