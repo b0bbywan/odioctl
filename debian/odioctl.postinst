@@ -1,0 +1,12 @@
+#!/bin/sh
+set -e
+
+# /etc/sudoers.d/odioctl grants this group passwordless root for a fixed argv,
+# so it must exist before sudo reads the fragment. Kept separate from odios'
+# `odio` group, which only carries state.json access. odios adds its target
+# user here; membership takes effect on that user's next session.
+if [ "$1" = "configure" ] && ! getent group odioctl >/dev/null; then
+    addgroup --system odioctl
+fi
+
+#DEBHELPER#

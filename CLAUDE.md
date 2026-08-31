@@ -29,6 +29,11 @@ Extracted from odios' `installer/ansible/roles/upgrade/files/odio_upgrade.py`.
   `sudo -n odioctl dac set <id>` / `dac unset`. Upgrades are never run by the
   web process: "Apply now" does `systemctl --user start odio-upgrade.service`
   (the unit odio-api drives too), so odio-ui shows the progress.
+- **Two groups, on purpose.** `odio` is odios' state group (read/write on
+  `/var/lib/odio`), and odios puts the installing user in it too. `odioctl` is
+  the one the sudoers fragment grants root to, created empty by the postinst
+  and joined only by the target user. Never key a sudoers rule on `odio`:
+  that would make every state reader a root user.
 - **upgrades.json is the contract with odio-ui and `upgrade apply`.** `check`
   sets `upgrade_available` on a version bump *or* on `pending_components`
   (enabled-but-not-installed, see `components.pending_components`); the web UI

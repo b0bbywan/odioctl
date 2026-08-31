@@ -25,6 +25,16 @@ class SudoersTests(unittest.TestCase):
     def test_no_wildcards(self):
         text = (ROOT / "data" / "sudoers" / "odioctl").read_text()
         for line in text.splitlines():
-            if line.startswith("%odio"):
+            if line.startswith("%odioctl"):
                 self.assertNotIn("*", line)
                 self.assertNotIn("?", line)
+
+    def test_grants_the_odioctl_group_only(self):
+        """`odio` is odios' state-access group, and the installing user is in it
+        too — keying root on it would hand root to every state reader.
+        """
+        text = (ROOT / "data" / "sudoers" / "odioctl").read_text()
+        rules = [ln for ln in text.splitlines() if ln and not ln.startswith("#")]
+        self.assertTrue(rules)
+        for line in rules:
+            self.assertRegex(line, r"^(%odioctl |Defaults:%odioctl )")
