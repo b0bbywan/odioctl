@@ -35,7 +35,7 @@ must not also grant passwordless root.
 ## CLI
 
 ```
-odioctl upgrade check  [--state PATH] [--url URL] [--output PATH]
+odioctl upgrade check  [--version TAG] [--state PATH] [--output PATH]
 odioctl upgrade apply  [--version V] [--state PATH] [--dry-run] [--force] [--reinstall] [--progress|--no-progress]
 odioctl upgrade verify [--state PATH] [--expected-version TAG]
 odioctl pwa-url
@@ -58,6 +58,19 @@ release with `INSTALL_*` derived from the state (opt-outs) and `RUN_*=N` for
 roles whose version did not move (smart upgrade). `--reinstall` re-runs every
 role in full. Only the current state.json schema is accepted — pre-2026.5
 installs are not supported.
+
+**Targeting a pre-release.** A box installed from a PR build runs a release the
+published manifest knows nothing about, so every role only that build ships
+reads as "not in this release" and never goes pending. `check --version pr-84`,
+or `ODIOCTL_ODIOS_VERSION=pr-84` in `/etc/default/odioctl` (read by the daily
+timer *and* by `odioctl web`, which refreshes upgrades.json on every toggle),
+compares against that release instead. Only a *tag* is overridable, never a
+URL: it is interpolated into a `github.com/b0bbywan/odios` release path, and
+anything that could walk out of it is refused — including a tag read back from
+upgrades.json, which is group-writable while `apply` curls that URL into bash
+as root. `check` records the tag under `target_tag` because a pre-release names
+itself by version (`2026.7.0rc2-9-gcad916c`) and is published under a tag
+(`pr-84`); `apply` needs the latter.
 
 ### `components`
 

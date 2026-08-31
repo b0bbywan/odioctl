@@ -152,13 +152,92 @@ class BuildUpgradesReportTests(unittest.TestCase):
             self.assertEqual(set(entry.keys()), {"name", "installed", "available"})
 
 
+# What `pr-84` publishes: it names itself by version, never by its tag.
+PRERELEASE_MAN: Manifest = {"odios": "2026.7.0rc2-9-gcad916c", "roles": {"qbzd": "2026.9.0b1"}}
+
+
+class TargetTagTests(unittest.TestCase):
+    """upgrades.json carries the release *tag* alongside the version, because a
+    pre-release is published under a tag ("pr-84") that its own manifest never
+    mentions — `apply` builds its install.sh URL from it."""
+
+    def test_tag_defaults_to_the_version_for_a_normal_release(self):
+        man: Manifest = {"odios": "2026.5.0", "roles": {"mpd": "2026.5.0"}}
+        report = check._build_upgrades_report(make_state(features=["mympd"]), man)
+        self.assertEqual(report["target_tag"], "2026.5.0")
+
+    def test_requested_tag_is_recorded(self):
+        with tempfile.TemporaryDirectory() as d:
+            state_path = write_state(d, make_state(roles={"mpd": "2026.5.0"}, features=["mympd"]))
+            out = os.path.join(d, "upgrades.json")
+            opts = check.CheckOptions(state=state_path, version="pr-84", output=out)
+            with patch.object(manifest, "fetch_manifest", return_value=PRERELEASE_MAN) as fetch:
+                report = check.refresh(opts)
+            fetch.assert_called_once_with(manifest.manifest_url("pr-84"))
+        assert report is not None
+        self.assertEqual(report["target_tag"], "pr-84")
+        self.assertEqual(report["latest"], "2026.7.0rc2-9-gcad916c")
+
+    def test_env_selects_the_release_for_the_daily_check(self):
+        with tempfile.TemporaryDirectory() as d:
+            state_path = write_state(d, make_state(roles={"mpd": "2026.5.0"}, features=["mympd"]))
+            out = os.path.join(d, "upgrades.json")
+            with (
+                patch.dict(os.environ, {manifest.ODIOS_VERSION_ENV: "pr-84"}),
+                patch.object(manifest, "fetch_manifest", return_value=PRERELEASE_MAN),
+                contextlib.redirect_stdout(io.StringIO()) as text,
+            ):
+                check.run_check(check.CheckOptions(state=state_path, output=out))
+            with open(out) as f:
+                report = json.load(f)
+        self.assertEqual(report["target_tag"], "pr-84")
+        self.assertIn("Comparing against release pr-84", text.getvalue())
+
+    def test_offline_refresh_keeps_the_release_it_cached(self):
+        # Losing the network must not silently move the box back onto the
+        # published latest: the cached manifest and its tag go together.
+        with tempfile.TemporaryDirectory() as d:
+            state_path = write_state(d, make_state(roles={"mpd": "2026.5.0"}, features=["mympd"]))
+            out = os.path.join(d, "upgrades.json")
+            with patch.object(manifest, "fetch_manifest", return_value=PRERELEASE_MAN):
+                check.refresh(check.CheckOptions(state=state_path, version="pr-84", output=out))
+            with patch.object(manifest, "fetch_manifest", return_value=None):
+                second = check.refresh(check.CheckOptions(state=state_path, output=out))
+        assert second is not None
+        self.assertEqual(second["target_tag"], "pr-84")
+
+    def test_unusable_version_is_refused(self):
+        with tempfile.TemporaryDirectory() as d:
+            state_path = write_state(d, make_state())
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                rc = check.run_check(
+                    check.CheckOptions(
+                        state=state_path,
+                        version="../../evil/repo",
+                        output=os.path.join(d, "upgrades.json"),
+                    )
+                )
+        self.assertEqual(rc, 2)
+        self.assertIn("not a release tag", err.getvalue())
+
+    def test_report_without_a_tag_reads_as_its_own_version(self):
+        with tempfile.TemporaryDirectory() as d:
+            out = os.path.join(d, "upgrades.json")
+            with open(out, "w") as f:
+                json.dump({"latest": "2026.5.0", "manifest": PRERELEASE_MAN}, f)
+            report = check.read_report(out)
+        assert report is not None
+        self.assertEqual(report["target_tag"], "2026.5.0")
+
+
 class RefreshTests(unittest.TestCase):
     def test_offline_refresh_reuses_cached_manifest(self):
         man: Manifest = {"odios": "2026.5.0", "roles": {"mpd": "2026.5.0"}}
         with tempfile.TemporaryDirectory() as d:
             state_path = write_state(d, make_state(roles={"mpd": "2026.5.0"}, features=["mympd"]))
             out = os.path.join(d, "upgrades.json")
-            opts = check.CheckOptions(state=state_path, url="x", output=out)
+            opts = check.CheckOptions(state=state_path, output=out)
             with patch.object(manifest, "fetch_manifest", return_value=man):
                 first = check.refresh(opts)
             assert first is not None
@@ -179,9 +258,7 @@ class RefreshTests(unittest.TestCase):
             state_path = write_state(d, make_state(roles={"mpd": "1"}))
             out = os.path.join(d, "upgrades.json")
             with patch.object(manifest, "fetch_manifest", return_value=None):
-                self.assertIsNone(
-                    check.refresh(check.CheckOptions(state=state_path, url="x", output=out))
-                )
+                self.assertIsNone(check.refresh(check.CheckOptions(state=state_path, output=out)))
             self.assertFalse(os.path.exists(out))
             self.assertIsNone(check.read_report(out))
 
@@ -196,7 +273,7 @@ class RunCheckTests(unittest.TestCase):
                 patch.object(manifest, "fetch_manifest", return_value=man),
                 contextlib.redirect_stdout(io.StringIO()),
             ):
-                rc = check.run_check(check.CheckOptions(state=state_path, url="x", output=out))
+                rc = check.run_check(check.CheckOptions(state=state_path, output=out))
             self.assertEqual(rc, 1)
             with open(out) as f:
                 report = json.load(f)
@@ -215,7 +292,7 @@ class RunCheckTests(unittest.TestCase):
                 patch.object(manifest, "fetch_manifest", return_value=man),
                 contextlib.redirect_stdout(io.StringIO()),
             ):
-                rc = check.run_check(check.CheckOptions(state=state_path, url="x", output=out))
+                rc = check.run_check(check.CheckOptions(state=state_path, output=out))
         self.assertEqual(rc, 0)
 
     def test_invalid_state_returns_2(self):
@@ -225,7 +302,7 @@ class RunCheckTests(unittest.TestCase):
                 json.dump({"odios": "2026.5.0"}, f)
             err = io.StringIO()
             with contextlib.redirect_stderr(err):
-                rc = check.run_check(check.CheckOptions(state=path, url="x", output=path + ".out"))
+                rc = check.run_check(check.CheckOptions(state=path, output=path + ".out"))
         self.assertEqual(rc, 2)
         self.assertIn("Error reading state", err.getvalue())
 
@@ -233,5 +310,5 @@ class RunCheckTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             state_path = write_state(d, make_state())
             with patch.object(manifest, "fetch_manifest", return_value=None):
-                rc = check.run_check(check.CheckOptions(state=state_path, url="x", output="/x"))
+                rc = check.run_check(check.CheckOptions(state=state_path, output="/x"))
         self.assertEqual(rc, 2)

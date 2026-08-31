@@ -1,3 +1,5 @@
+import contextlib
+import io
 import json
 import os
 import tempfile
@@ -35,6 +37,80 @@ class ManifestUrlTests(unittest.TestCase):
         self.assertTrue(manifest.install_url("2026.5.0").endswith("/download/2026.5.0/install.sh"))
 
 
+class ReleaseTagTests(unittest.TestCase):
+    def test_accepts_the_tag_shapes_odios_publishes(self):
+        for tag in ("latest", "2026.5.0", "2026.7.0rc2", "2026.7.0rc2-9-gcad916c", "pr-84"):
+            with self.subTest(tag=tag):
+                self.assertTrue(manifest.is_release_tag(tag))
+
+    def test_rejects_anything_that_leaves_the_release_path(self):
+        # curl normalises `..` away, so a traversal in the tag would fetch —
+        # and in `apply`, pipe into bash as root — a foreign repository.
+        for tag in (
+            "../../someone/else/releases/download/x",
+            "..",
+            "2026.5.0/../../evil",
+            "https://evil.invalid/install.sh",
+            "2026.5.0?x=1",
+            "",
+            "-rf",
+            "a" * 65,
+        ):
+            with self.subTest(tag=tag):
+                self.assertFalse(manifest.is_release_tag(tag))
+
+    def test_url_builders_refuse_an_unsafe_tag(self):
+        with self.assertRaises(ValueError):
+            manifest.manifest_url("../../evil/repo/releases/download/x")
+        with self.assertRaises(ValueError):
+            manifest.install_url("../../evil/repo/releases/download/x")
+
+
+class CheckSourceTests(unittest.TestCase):
+    def _source(self, version=None, env=None):
+        environ = {manifest.ODIOS_VERSION_ENV: env} if env is not None else {}
+        with patch.dict(os.environ, environ, clear=False):
+            if env is None:
+                os.environ.pop(manifest.ODIOS_VERSION_ENV, None)
+            return manifest.check_source(version)
+
+    def test_defaults_to_the_published_latest_manifest(self):
+        self.assertEqual(self._source(), (manifest.LATEST_MANIFEST_URL, None))
+
+    def test_env_selects_a_prerelease_by_tag(self):
+        url, tag = self._source(env="pr-84")
+        self.assertEqual(tag, "pr-84")
+        self.assertEqual(url, manifest.manifest_url("pr-84"))
+
+    def test_explicit_version_wins_over_env(self):
+        self.assertEqual(self._source(version="2026.6.0", env="pr-84")[1], "2026.6.0")
+
+    def test_blank_env_is_no_override(self):
+        self.assertEqual(self._source(env="   "), (manifest.LATEST_MANIFEST_URL, None))
+
+    def test_unusable_env_warns_and_falls_back(self):
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            source = self._source(env="../../evil/repo")
+        self.assertEqual(source, (manifest.LATEST_MANIFEST_URL, None))
+        self.assertIn("not a release tag", err.getvalue())
+
+    def test_unusable_explicit_version_raises(self):
+        # Typed on the command line, so it is an error rather than a warning.
+        with self.assertRaises(ValueError):
+            self._source(version="../../evil/repo")
+
+    def test_every_manifest_url_is_built_here(self):
+        # No URL can be named from anywhere: whatever the inputs, the fetch
+        # target is either the published manifest or a github.com release path.
+        for source in (self._source(), self._source(env="pr-84"), self._source(version="2026.6.0")):
+            with self.subTest(source=source):
+                self.assertTrue(
+                    source[0] == manifest.LATEST_MANIFEST_URL
+                    or source[0].startswith(f"https://github.com/{manifest.GITHUB_REPO}/releases/")
+                )
+
+
 class FetchManifestTests(unittest.TestCase):
     def test_returns_parsed_json_on_success(self):
         body = b'{"odios": "2026.5.0", "roles": {"mpd": "2026.5.0"}}'
@@ -66,6 +142,18 @@ class ResolveManifestTests(unittest.TestCase):
         path = self._upgrades_file({"latest": "2026.5.0", "manifest": man})
         with patch.object(manifest, "fetch_manifest") as fetch:
             result = manifest._resolve_manifest("2026.5.0", path)
+        fetch.assert_not_called()
+        self.assertEqual(result, man)
+
+    def test_cache_hit_is_keyed_on_the_tag_not_the_version(self):
+        # pr-84's manifest calls itself 2026.7.0rc2-9-gcad916c; `apply` asks
+        # for the tag, so matching on `latest` alone would refetch every time.
+        man = {"odios": "2026.7.0rc2-9-gcad916c", "roles": {"qbzd": "2026.9.0b1"}}
+        path = self._upgrades_file(
+            {"latest": "2026.7.0rc2-9-gcad916c", "target_tag": "pr-84", "manifest": man}
+        )
+        with patch.object(manifest, "fetch_manifest") as fetch:
+            result = manifest._resolve_manifest("pr-84", path)
         fetch.assert_not_called()
         self.assertEqual(result, man)
 
@@ -107,6 +195,12 @@ class UpgradesJsonReadersTests(unittest.TestCase):
     def test_resolve_version_reads_latest_from_cache(self):
         path = self._upgrades_file({"latest": "2026.6.0"})
         self.assertEqual(manifest.resolve_version(None, path), "2026.6.0")
+
+    def test_resolve_version_prefers_the_tag_check_recorded(self):
+        # A pre-release calls itself 2026.7.0rc2-9-gcad916c but is published
+        # under `pr-84`: only the tag can rebuild the install.sh URL.
+        path = self._upgrades_file({"latest": "2026.7.0rc2-9-gcad916c", "target_tag": "pr-84"})
+        self.assertEqual(manifest.resolve_version(None, path), "pr-84")
 
     def test_resolve_version_defaults_to_latest(self):
         self.assertEqual(manifest.resolve_version(None, "/nonexistent"), "latest")

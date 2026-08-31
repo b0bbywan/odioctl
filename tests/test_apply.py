@@ -359,6 +359,44 @@ class RunApplyTests(unittest.TestCase):
         fetch.assert_not_called()
         self.assertIn("ODIOS_VERSION=2026.6.0", text)
 
+    def test_refuses_a_target_that_is_not_a_release_tag(self):
+        # upgrades.json is group-writable and this runs as root: a planted
+        # `latest` must not become part of a curl | bash URL.
+        with tempfile.TemporaryDirectory() as d:
+            write_state(d, make_state(odios="2026.5.0"))
+            with open(os.path.join(d, "upgrades.json"), "w") as f:
+                json.dump(
+                    {
+                        "upgrade_available": True,
+                        "latest": "../../someone/else/releases/download/x",
+                    },
+                    f,
+                )
+            with patch.object(apply.subprocess, "run") as run:
+                rc, text = self._run(d)
+        self.assertEqual(rc, 2)
+        run.assert_not_called()
+        self.assertIn("not a release tag", text)
+
+    def test_targets_the_tag_recorded_by_check(self):
+        man: Manifest = {"odios": "2026.7.0rc2-9-gcad916c", "roles": {}}
+        with tempfile.TemporaryDirectory() as d:
+            write_state(d, make_state(odios="2026.7.0rc2"))
+            with open(os.path.join(d, "upgrades.json"), "w") as f:
+                json.dump(
+                    {
+                        "upgrade_available": True,
+                        "latest": "2026.7.0rc2-9-gcad916c",
+                        "target_tag": "pr-84",
+                        "manifest": man,
+                    },
+                    f,
+                )
+            rc, text = self._run(d, dry_run=True)
+        self.assertEqual(rc, 0)
+        self.assertIn("Upgrading to pr-84 via", text)
+        self.assertIn("/releases/download/pr-84/install.sh", text)
+
     def test_missing_state_returns_2(self):
         with tempfile.TemporaryDirectory() as d:
             rc, _ = self._run(d, force=True)

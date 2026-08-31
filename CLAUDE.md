@@ -39,6 +39,19 @@ Extracted from odios' `installer/ansible/roles/upgrade/files/odio_upgrade.py`.
   (enabled-but-not-installed, see `components.pending_components`); the web UI
   calls `check.refresh()` after every toggle (offline → cached manifest) so the
   badge lights up and `apply` does not refuse. Disabling is never pending.
+- **The target release is decided in one place: `check`.** `apply` never picks a
+  release of its own on the box (`odio-upgrade.service` is a frozen sudoers
+  argv, no `--version`), it follows `upgrades.json`. So a test box is steered by
+  pointing `check` at a pre-release — `--version pr-84` or
+  `ODIOCTL_ODIOS_VERSION` (`/etc/default/odioctl`, wired into both `--user`
+  units: the web process refreshes upgrades.json on every toggle). Never add a
+  *URL* override reachable from the environment — the tag is interpolated into a
+  `b0bbywan/odios` release path, which is what keeps a rogue value to picking
+  another odios release instead of a manifest of its own; `manifest.is_release_tag`
+  is that boundary and `apply` re-checks it, because upgrades.json is
+  group-writable and its tag ends up in a `curl … | bash` run as root. The tag
+  and the version are two strings: `pr-84` publishes `2026.7.0rc2-9-gcad916c`,
+  hence `target_tag` next to `latest` in upgrades.json.
 - **The web UI is server-rendered HTML forms only** — no JSON API, no JavaScript.
   Markup lives in `web/templates/*.html` (`string.Template`, `$name` placeholders,
   values escaped in `web/server.py`), styling in `web/static/style.css` which
