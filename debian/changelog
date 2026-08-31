@@ -1,3 +1,17 @@
+odioctl (0.1.0~beta.4) unstable; urgency=medium
+
+  * upgrade: `check` can target an odios pre-release, with `--version pr-84`
+    or ODIOCTL_ODIOS_VERSION in /etc/default/odioctl (read by the daily timer
+    and by `odioctl web`). Until now a box installed from a PR build compared
+    itself to the published manifest, which knows nothing of the roles that
+    build ships, so enabling one of them never went pending. Only a release
+    tag is accepted, never a URL, and `apply` re-validates the tag it reads
+    from upgrades.json before it reaches `curl … | bash`.
+  * components: the Tidal plugin offers its login as an action, running
+    upmpdcli's own get_credentials.py so the operator needs no shell.
+
+ -- Mathieu Réquillart <mathieu.requillart@gmail.com>  Tue, 01 Sep 2026 10:00:00 +0200
+
 odioctl (0.1.0~beta.3) unstable; urgency=medium
 
   * sudoers: grant a new `odioctl` system group instead of `odio`. `odio`
