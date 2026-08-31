@@ -4,4 +4,8 @@ Documentation=https://github.com/b0bbywan/odioctl
 
 [Service]
 Type=oneshot
+# ODIOCTL_ODIOS_VERSION=<tag> there points the upgrade check at an odios
+# pre-release instead of the published latest one (a test box). Both units
+# read it: `odioctl web` refreshes upgrades.json on every component toggle.
+EnvironmentFile=-/etc/default/odioctl
 ExecStart=/usr/bin/odioctl upgrade check
