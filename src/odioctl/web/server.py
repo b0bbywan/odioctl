@@ -274,7 +274,7 @@ class Services:
                 )
                 return f"{action.label}: already running — the link is below."
             self._notes.pop(key, None)
-            argv = [part.format(host=host) for part in action.argv]
+            argv = [part.format(host=host, home=os.path.expanduser("~")) for part in action.argv]
             try:
                 proc = self.action_spawn(argv)
             except (OSError, subprocess.SubprocessError) as e:

@@ -170,6 +170,26 @@ class ActionTests(unittest.TestCase):
             self.assertNotIn("action:", out.getvalue())
 
 
+class TidalLoginActionTests(unittest.TestCase):
+    """The catalog entry itself: what odioctl offers to run for the Tidal plugin."""
+
+    def test_login_runs_upmpdcli_helper_against_the_user_home(self):
+        st = make_state(roles={"upmpdcli": "1"}, features=["tidal"])
+        c = next(x for x in components.list_components(st) if x.name == "tidal")
+        (login,) = c.actions
+        self.assertIs(components.find_action("feature", "tidal", "login"), login)
+        # argv runs without a shell, so the home comes from {home}, not from ~
+        self.assertEqual(
+            [p.format(home="/home/alice") for p in login.argv],
+            [
+                "python3",
+                "/usr/share/upmpdcli/cdplugins/tidal/get_credentials.py",
+                "-f",
+                "/home/alice/.cache/upmpdcli/tidal/oauth2.credentials.json",
+            ],
+        )
+
+
 class QbzdLoginActionTests(unittest.TestCase):
     """The catalog entry itself: what odioctl offers to run for qbzd."""
 

@@ -60,8 +60,9 @@ Extracted from odios' `installer/ansible/roles/upgrade/files/odio_upgrade.py`.
   A POST re-renders the page (no redirects, no query-string state).
 - **`components.Action` = a command the box runs for the user**, so nobody needs
   a shell on it. `argv` lives in the catalog and is never built from the request
-  — only `{host}` is substituted, with the name the browser reached the box by,
-  so an OAuth callback lands here. The web process runs it as the target user
+  — only `{host}` (the name the browser reached the box by, so an OAuth callback
+  lands here) and `{home}` (the target user's home: argv runs without a shell, so
+  a `~` would stay literal) are substituted. The web process runs it as the target user
   (no sudo) and does *not* wait for it: such a command prints a URL and then
   keeps running until the user has followed it, so odioctl reads stdout only
   until the `https://` link. The output comes back in a modal (`modal.html`) —
@@ -69,7 +70,9 @@ Extracted from odios' `installer/ansible/roles/upgrade/files/odio_upgrade.py`.
   shows once. What persists is the row's own link while the process lives, then
   a note with the exit code. Offered for installed components only. qbzd's
   `login` is the first one: it prints its Qobuz URL, then holds a one-shot
-  listener for 300s waiting for the browser to come back to `{host}`.
+  listener for 300s waiting for the browser to come back to `{host}`. Tidal's
+  runs upmpdcli's own `get_credentials.py`, whose link is followed on any device
+  — no callback, hence `{home}` for the credentials path and no `{host}`.
 
 ## Dev loop
 

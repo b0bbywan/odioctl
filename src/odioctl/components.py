@@ -38,9 +38,12 @@ Status = Literal["installed", "excluded", "default"]
 class Action:
     """A one-off command the box runs for the user, so no shell is needed.
 
-    `argv` is fixed here and never built from request input; `{host}` is
-    substituted with the address the browser reached the box by, so a login
-    callback comes back to this machine (`qbzd login --callback-host`).
+    `argv` is fixed here and never built from request input. Two placeholders
+    are filled in by the server, both from what it knows rather than from the
+    request body: `{host}` is the address the browser reached the box by, so a
+    login callback comes back to this machine (`qbzd login --callback-host`),
+    and `{home}` is the target user's home — argv runs without a shell, so a
+    `~` would stay a literal tilde.
 
     These commands print a URL and then keep running until the user has
     followed it (`qbzd login`: 300s deadline, one-shot listener on an ephemeral
@@ -138,7 +141,27 @@ ROLE_CATALOG: dict[str, RoleInfo] = {
 
 FEATURE_CATALOG: dict[str, FeatureInfo] = {
     "mympd": FeatureInfo("myMPD", "Web UI for MPD (port 8080)", "mympd", "mpd"),
-    "tidal": FeatureInfo("Tidal", "Tidal streaming through upmpdcli", "upmpdcli-tidal", "upmpdcli"),
+    "tidal": FeatureInfo(
+        "Tidal",
+        "Tidal streaming through upmpdcli",
+        "upmpdcli-tidal",
+        "upmpdcli",
+        actions=(
+            Action(
+                id="login",
+                label="Log in to Tidal",
+                description="Sign in to Tidal",
+                argv=(
+                    "python3",
+                    "/usr/share/upmpdcli/cdplugins/tidal/get_credentials.py",
+                    "-f",
+                    "{home}/.cache/upmpdcli/tidal/oauth2.credentials.json",
+                ),
+                link_label="Open the Tidal sign-in page",
+                link_note="valid 5 minutes",
+            ),
+        ),
+    ),
     "qobuz": FeatureInfo("Qobuz", "Qobuz streaming through upmpdcli", "upmpdcli-qobuz", "upmpdcli"),
     "upnpwebradios": FeatureInfo(
         "Web radios", "Internet radios through upmpdcli", "upmpdcli-radios", "upmpdcli"
