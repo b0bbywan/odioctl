@@ -215,6 +215,12 @@ def run_apply(opts: ApplyOptions) -> int:
         return 0
 
     version = manifest.resolve_version(opts.version, upgrades_path)
+    # The tag lands in a github.com path that is curl'd into bash as root, and
+    # upgrades.json is group-writable by design (any `odio` member can rewrite
+    # it): refuse anything that could walk out of the odios release path.
+    if not manifest.is_release_tag(version):
+        print(f"Refusing target {version!r}: not a release tag.", flush=True)
+        return 2
     if _is_downgrade(version, st["odios"]):
         print(f"Refusing to downgrade: target {version} < installed {st['odios']}.", flush=True)
         return 2

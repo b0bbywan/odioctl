@@ -113,9 +113,11 @@ jobs:
           apt-get install -y ./dist/odioctl_*.deb
           odioctl --version
           odioctl upgrade apply --help >/dev/null
-          # exit 1 = "upgrades available" is the expected verdict for the fixture
+          # `check` only ever fetches a github.com release manifest, so there is
+          # no offline round-trip to smoke test here (the unit tests cover it):
+          # assert the shipped binary refuses a tag that escapes that path.
           odioctl upgrade check --state tests/fixtures/state.json \
-            --url "file://$PWD/tests/fixtures/manifest.json" --output /tmp/upgrades.json || test $? -eq 1
+            --version '../../evil' --output /tmp/upgrades.json 2>&1 | grep -q 'not a release tag'
           odioctl upgrade apply --dry-run --force --state tests/fixtures/state.json
           odioctl upgrade verify --state tests/fixtures/state.json --expected-version 2026.7.0rc1
           odioctl components --state tests/fixtures/state.json list
