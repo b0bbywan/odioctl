@@ -25,7 +25,12 @@ The package ships (not auto-enabled — odios' installer enables them per user):
 | `/usr/lib/systemd/user/odio-upgrade.service` | `sudo odioctl upgrade apply --progress` (started by odio-api) |
 | `/usr/lib/systemd/user/odioctl-web.socket` | port 8021 — **this is the unit to enable** |
 | `/usr/lib/systemd/user/odioctl-web.service` | `odioctl web`, started on the first connection |
-| `/etc/sudoers.d/odioctl` | NOPASSWD for the `odio` group: `upgrade apply --progress`, `dac set <id>` (one line per id), `dac unset` |
+| `/etc/sudoers.d/odioctl` | NOPASSWD for the `odioctl` group: `upgrade apply --progress`, `dac set <id>` (one line per id), `dac unset` |
+
+The postinst creates the `odioctl` system group and leaves it empty; odios adds
+its target user. It is deliberately not the `odio` group, which carries
+state.json access and holds the installing user too: a group that grants reads
+must not also grant passwordless root.
 
 ## CLI
 
@@ -96,7 +101,8 @@ carries a per-process token, so a cross-site page cannot drive the box. There
 is no authentication (same LAN trust model as odio-api); use `--bind 127.0.0.1`
 to keep it local. Runs as the odios target user; state.json is edited
 directly (needs `/var/lib/odio` group-writable by `odio`, see below),
-config.txt through `sudo -n odioctl dac …`.
+config.txt through `sudo -n odioctl dac …` (needs that user in the `odioctl`
+group).
 
 ## What odios has to do (follow-up, other repos)
 
@@ -105,7 +111,10 @@ config.txt through `sudo -n odioctl dac …`.
 - **odios `roles/upgrade`**: `apt install odioctl` instead of copying
   `odio_upgrade.py`; drop its own units/sudoers templates (the package ships
   them) and `/usr/local/bin/odio-upgrade`; enable
-  `odio-check-upgrade.timer` and `odioctl-web.socket` for the target user.
+  `odio-check-upgrade.timer` and `odioctl-web.socket` for the target user;
+  add that user to the `odioctl` group (after the apt install, which creates
+  it) so the sudoers fragment applies. On an existing box the membership only
+  reaches the running `systemd --user` session on the next login.
 - **odios `write_state.yml`**: `/var/lib/odio` `2770 root:odio` and
   `state.json` `0660` so `odioctl components`/web can write it as `odio`;
   call `/usr/bin/odioctl upgrade check`.

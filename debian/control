@@ -18,6 +18,7 @@ Package: odioctl
 Architecture: all
 Multi-Arch: foreign
 Depends:
+ adduser,
  python3 (>= 3.11),
  sudo,
  ${misc:Depends},
@@ -36,4 +37,5 @@ Description: system control for odio: upgrades, components, DAC, web UI
   * odioctl web — stdlib HTTP server with a plain-HTML page for the above.
  .
  Ships systemd --user units (not auto-enabled) and a sudoers fragment
- granting the `odio` group the exact privileged commands it needs.
+ granting the `odioctl` system group the exact privileged commands it needs.
+ That group is created here and left empty: odios adds its target user to it.
