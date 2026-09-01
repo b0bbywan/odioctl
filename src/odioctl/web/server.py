@@ -1,9 +1,9 @@
-"""`odioctl web` — the HTTP end of the settings UI: routes and CLI.
+"""`odioctl web` — the HTTP end of the settings UI: routes, socket activation, CLI.
 
 Plain HTML forms (POST re-renders the page), no JavaScript, no JSON API. The
 work behind each form is in web/services.py, the markup in web/render.py and
 web/templates/; what is left here is the wire: five POST routes, the static
-files, and `odioctl web` itself.
+files, the systemd socket handover, and `odioctl web` itself.
 
 Runs as the target user (systemd --user unit). No authentication: same LAN
 trust model as odio-api. Every form carries a per-process token so a
@@ -13,8 +13,10 @@ cross-site HTML form cannot drive the box.
 from __future__ import annotations
 
 import argparse
+import os
 import secrets
 import signal
+import socket
 import sys
 import threading
 import urllib.parse
@@ -29,9 +31,14 @@ from odioctl.web.config import DEFAULT_PORT, WebConfig
 from odioctl.web.services import ActionResult, Services, TokenError, WebError
 
 MAX_BODY = 16 * 1024
+SD_LISTEN_FDS_START = 3  # sd_listen_fds(3): systemd hands sockets over from fd 3 up
 
 PAGE_PATHS = frozenset({"/", "/index.html"})
 STATIC_PREFIX = "/static/"
+
+
+class ActivationError(Exception):
+    """systemd handed over something other than the one socket odioctl-web.socket declares."""
 
 
 # --- routes ---------------------------------------------------------------
@@ -180,9 +187,74 @@ def make_handler(services: Services) -> type[Handler]:
     return type("BoundHandler", (Handler,), {"services": services})
 
 
-def make_server(cfg: WebConfig, services: Services | None = None) -> ThreadingHTTPServer:
+# --- socket activation ----------------------------------------------------
+#
+# odioctl-web.socket is what gets enabled; systemd binds port 8021 and starts the
+# service on the first connection, passing the listening socket as fd 3. Running
+# `odioctl web` by hand (no LISTEN_FDS) still binds for itself, so the dev loop and
+# --bind/--port are unaffected.
+
+
+def systemd_socket() -> socket.socket | None:
+    """The listening socket passed by systemd, or None when not socket-activated.
+
+    Follows sd_listen_fds(3): LISTEN_PID must name this process and LISTEN_FDS counts
+    the sockets from fd 3 up. The variables are removed from the environment so that
+    nothing we exec later (`sudo odioctl dac …`) sees a handover meant for us.
+    """
+    listen_pid = os.environ.pop("LISTEN_PID", None)
+    listen_fds = os.environ.pop("LISTEN_FDS", None)
+    os.environ.pop("LISTEN_FDNAMES", None)
+    if listen_pid is None or listen_fds is None:
+        return None
+    if listen_pid != str(os.getpid()):
+        return None  # inherited from a parent; the handover was not addressed to us
+    try:
+        count = int(listen_fds)
+    except ValueError:
+        raise ActivationError(f"LISTEN_FDS is not a number: {listen_fds!r}") from None
+    if count == 0:
+        return None
+    if count != 1:
+        raise ActivationError(f"expected one socket from systemd, got {count}")
+    sock = socket.socket(fileno=SD_LISTEN_FDS_START)
+    if sock.type != socket.SOCK_STREAM:
+        raise ActivationError("the activation socket is not a stream socket (ListenStream=)")
+    if sock.family not in (socket.AF_INET, socket.AF_INET6):
+        # The page links to odio-ui by host:port and reads the Host header; a Unix
+        # socket would have no address to speak of.
+        raise ActivationError("the activation socket is not TCP (use ListenStream=PORT)")
+    return sock
+
+
+class InheritedHTTPServer(ThreadingHTTPServer):
+    """ThreadingHTTPServer on a socket systemd already bound and listened on.
+
+    Binding is skipped; only the bookkeeping HTTPServer.server_bind() would have done
+    is reproduced, so the address family follows whatever the unit asked for.
+    """
+
+    def __init__(self, sock: socket.socket, handler: type[BaseHTTPRequestHandler]) -> None:
+        self.address_family = sock.family
+        super().__init__(sock.getsockname()[:2], handler, bind_and_activate=False)
+        self.socket.close()  # the unused socket TCPServer.__init__ just made
+        self.socket = sock
+        addr = sock.getsockname()
+        self.server_address = addr
+        self.server_name = socket.getfqdn(str(addr[0]))
+        self.server_port = int(addr[1])
+
+
+def make_server(
+    cfg: WebConfig, services: Services | None = None, sock: socket.socket | None = None
+) -> ThreadingHTTPServer:
     services = services or Services(cfg)
-    srv = ThreadingHTTPServer((cfg.bind, cfg.port), make_handler(services))
+    handler = make_handler(services)
+    srv: ThreadingHTTPServer = (
+        InheritedHTTPServer(sock, handler)
+        if sock is not None
+        else ThreadingHTTPServer((cfg.bind, cfg.port), handler)
+    )
     srv.daemon_threads = True
     return srv
 
@@ -195,13 +267,13 @@ def add_web_arguments(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--bind",
         default="0.0.0.0",
-        help="address to listen on (default: all)",
+        help="address to listen on (default: all; ignored under socket activation)",
     )
     p.add_argument(
         "--port",
         type=int,
         default=DEFAULT_PORT,
-        help=f"TCP port (default: {DEFAULT_PORT})",
+        help=f"TCP port (default: {DEFAULT_PORT}; ignored under socket activation)",
     )
     p.add_argument("--state", default=state.SYSTEM_STATE_PATH, help="path to state.json")
     p.add_argument(
@@ -228,13 +300,24 @@ def web_from_args(ns: argparse.Namespace) -> int:
 
 
 def serve(cfg: WebConfig) -> int:
-    srv = make_server(cfg)
-    ip = (
-        cfg.bind
-        if cfg.bind not in ("0.0.0.0", "::")
-        else (netinfo.default_route_ip() or "127.0.0.1")
-    )
-    print(f"Serving odioctl web UI on http://{ip}:{cfg.port}", flush=True)
+    try:
+        sock = systemd_socket()
+    except ActivationError as e:
+        print(f"odioctl web: {e}", file=sys.stderr)
+        return 2
+    srv = make_server(cfg, sock=sock)
+    if sock is not None:
+        print(
+            f"Serving odioctl web UI on the socket passed by systemd (port {srv.server_port})",
+            flush=True,
+        )
+    else:
+        ip = (
+            cfg.bind
+            if cfg.bind not in ("0.0.0.0", "::")
+            else (netinfo.default_route_ip() or "127.0.0.1")
+        )
+        print(f"Serving odioctl web UI on http://{ip}:{cfg.port}", flush=True)
 
     def _stop(_signum: int, _frame: Any) -> None:
         threading.Thread(target=srv.shutdown, daemon=True).start()
