@@ -45,6 +45,16 @@ Extracted from odios' `installer/ansible/roles/upgrade/files/odio_upgrade.py`.
   hand-mirrors odio-ui's look (go-odio-api: forest zinc palette, lime accent) so
   both pages on the box feel like one product — keep it in sync, no Tailwind/htmx.
   A POST re-renders the page (no redirects, no query-string state).
+- **`components.Action` = a command the box runs for the user**, so nobody needs
+  a shell on it. `argv` lives in the catalog and is never built from the request
+  — only `{host}` is substituted, with the name the browser reached the box by,
+  so an OAuth callback lands here. The web process runs it as the target user
+  (no sudo) and does *not* wait for it: such a command prints a URL and then
+  keeps running until the user has followed it, so odioctl reads stdout only
+  until the `https://` link. The output comes back in a modal (`modal.html`) —
+  still no JS: the POST response carries it and `Close` is a link to `/`, so it
+  shows once. What persists is the row's own link while the process lives, then
+  a note with the exit code. Offered for installed components only.
 
 ## Dev loop
 
