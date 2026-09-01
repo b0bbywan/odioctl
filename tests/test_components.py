@@ -1,6 +1,7 @@
 import contextlib
 import io
 import json
+import os
 import tempfile
 import unittest
 from dataclasses import replace
@@ -11,6 +12,19 @@ from odioctl.manifest import Manifest
 from odioctl.state import State
 from odioctl.upgrade import apply
 from tests._helpers import make_state, write_state
+
+
+def _all_actions() -> list[tuple[str, str, components.Action]]:
+    catalogs: list[tuple[str, dict[str, object]]] = [
+        ("role", dict(components.ROLE_CATALOG)),
+        ("feature", dict(components.FEATURE_CATALOG)),
+    ]
+    return [
+        (kind, name, action)
+        for kind, catalog in catalogs
+        for name, info in catalog.items()
+        for action in getattr(info, "actions", ())
+    ]
 
 
 def role(st: State, name: str) -> components.Component:
@@ -168,6 +182,36 @@ class ActionTests(unittest.TestCase):
                 components._print_table(components.list_components(st))
             self.assertIn("mpd", out.getvalue())
             self.assertNotIn("action:", out.getvalue())
+
+
+class TidalLoginActionTests(unittest.TestCase):
+    """The catalog entry itself: what odioctl offers to run for the Tidal plugin."""
+
+    def test_login_runs_upmpdcli_helper_against_the_user_home(self):
+        st = make_state(roles={"upmpdcli": "1"}, features=["tidal"])
+        c = next(x for x in components.list_components(st) if x.name == "tidal")
+        (login,) = c.actions
+        self.assertIs(components.find_action("feature", "tidal", "login"), login)
+        # argv runs without a shell, so the home comes from {home}, not from ~
+        self.assertEqual(
+            [p.format(home="/home/alice") for p in login.argv],
+            [
+                "python3",
+                "-u",
+                "/usr/share/upmpdcli/cdplugins/tidal/get_credentials.py",
+                "-f",
+                "/home/alice/.cache/upmpdcli/tidal/oauth2.credentials.json",
+            ],
+        )
+
+    def test_every_python_action_is_unbuffered(self):
+        # The server lifts the login URL off stdout while the child keeps
+        # running. stdout is a pipe, so a CPython child block-buffers it and
+        # the URL never arrives: the modal shows "(no output)".
+        for kind, name, action in _all_actions():
+            if os.path.basename(action.argv[0]) in ("python", "python3"):
+                with self.subTest(action=f"{kind}:{name}:{action.id}"):
+                    self.assertIn("-u", action.argv[1:2])
 
 
 class QbzdLoginActionTests(unittest.TestCase):
