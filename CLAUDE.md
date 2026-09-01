@@ -54,7 +54,9 @@ Extracted from odios' `installer/ansible/roles/upgrade/files/odio_upgrade.py`.
   until the `https://` link. The output comes back in a modal (`modal.html`) —
   still no JS: the POST response carries it and `Close` is a link to `/`, so it
   shows once. What persists is the row's own link while the process lives, then
-  a note with the exit code. Offered for installed components only.
+  a note with the exit code. Offered for installed components only. qbzd's
+  `login` is the first one: it prints its Qobuz URL, then holds a one-shot
+  listener for 300s waiting for the browser to come back to `{host}`.
 
 ## Dev loop
 
