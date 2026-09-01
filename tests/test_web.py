@@ -1,5 +1,8 @@
+import contextlib
+import io
 import json
 import os
+import socket
 import subprocess
 import tempfile
 import threading
@@ -626,6 +629,93 @@ class DacFormTests(WebTestCase):
         os.unlink(self.config)
         _, body = self.get("/")
         self.assertIn("No config.txt found", body)
+
+
+class SocketActivationTests(WebTestCase):
+    """`odioctl web` under odioctl-web.socket: systemd binds, we inherit fd 3."""
+
+    @contextlib.contextmanager
+    def as_listen_fd(self, sock: socket.socket):
+        """Put `sock` on fd 3, where sd_listen_fds(3) says the handover lands."""
+        fd = server.SD_LISTEN_FDS_START
+        try:
+            saved = os.dup(fd)
+        except OSError:
+            saved = None
+        os.dup2(sock.fileno(), fd)
+        try:
+            yield
+        finally:
+            if saved is None:
+                os.close(fd)
+            else:
+                os.dup2(saved, fd)
+                os.close(saved)
+
+    def listener(self) -> socket.socket:
+        lst = socket.socket()
+        lst.bind(("127.0.0.1", 0))
+        lst.listen(5)
+        self.addCleanup(lst.close)
+        return lst
+
+    def test_no_handover_means_no_activation(self):
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertIsNone(server.systemd_socket())
+
+    def test_handover_addressed_to_a_parent_is_ignored(self):
+        env = {"LISTEN_PID": str(os.getpid() + 1), "LISTEN_FDS": "1"}
+        with patch.dict(os.environ, env, clear=True):
+            self.assertIsNone(server.systemd_socket())
+            # …and never forwarded to `sudo odioctl dac …`.
+            self.assertNotIn("LISTEN_PID", os.environ)
+            self.assertNotIn("LISTEN_FDS", os.environ)
+
+    def test_zero_sockets_means_no_activation(self):
+        env = {"LISTEN_PID": str(os.getpid()), "LISTEN_FDS": "0"}
+        with patch.dict(os.environ, env, clear=True):
+            self.assertIsNone(server.systemd_socket())
+
+    def test_unexpected_handover_is_refused(self):
+        for fds in ("2", "not-a-number"):
+            with self.subTest(fds=fds):
+                env = {"LISTEN_PID": str(os.getpid()), "LISTEN_FDS": fds}
+                with patch.dict(os.environ, env, clear=True):  # noqa: SIM117
+                    with self.assertRaises(server.ActivationError):
+                        server.systemd_socket()
+
+    def test_the_inherited_socket_is_the_one_systemd_opened(self):
+        lst = self.listener()
+        env = {"LISTEN_PID": str(os.getpid()), "LISTEN_FDS": "1"}
+        with self.as_listen_fd(lst), patch.dict(os.environ, env, clear=True):
+            sock = server.systemd_socket()
+            self.assertIsNotNone(sock)
+            assert sock is not None
+            self.assertEqual(sock.getsockname(), lst.getsockname())
+            self.assertNotIn("LISTEN_PID", os.environ)
+            sock.detach()  # fd 3 goes back to as_listen_fd()
+
+    def test_serves_on_a_socket_it_did_not_bind(self):
+        lst = self.listener()
+        srv = server.make_server(self.services.cfg, self.services, sock=lst)
+        self.addCleanup(srv.server_close)
+        self.assertEqual(srv.socket.fileno(), lst.fileno())
+        self.assertEqual(srv.server_port, lst.getsockname()[1])
+        threading.Thread(
+            target=srv.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True
+        ).start()
+        self.addCleanup(srv.shutdown)
+        with urllib.request.urlopen(f"http://127.0.0.1:{srv.server_port}/", timeout=5) as resp:
+            self.assertEqual(resp.status, 200)
+            self.assertIn("<h1>Settings</h1>", resp.read().decode())
+
+    def test_serve_refuses_a_broken_handover(self):
+        env = {"LISTEN_PID": str(os.getpid()), "LISTEN_FDS": "2"}
+        err = io.StringIO()
+        with patch.dict(os.environ, env, clear=True), contextlib.redirect_stderr(err):
+            rc = server.serve(self.services.cfg)
+        self.assertEqual(rc, 2)
+        self.assertIn("got 2", err.getvalue())
 
 
 class WebCliTests(unittest.TestCase):
