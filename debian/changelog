@@ -1,8 +1,75 @@
-odioctl (0.1.0) unstable; urgency=medium
+odioctl (0.1.0~beta.7) unstable; urgency=medium
+
+  * web: the Upgrade section leads the page, above Components — it is what
+    the box gets opened for, and it always has something to say.
+  * web: the logo links back to odio-ui on the box (port 8018, by the name
+    the browser reached it by) rather than to the documentation; the footer
+    link points at docs.odio.love/operations/settings/ instead of the site
+    root.
+
+ -- Mathieu Réquillart <mathieu.requillart@gmail.com>  Tue, 01 Sep 2026 21:00:00 +0200
+
+odioctl (0.1.0~beta.6) unstable; urgency=medium
+
+  * components: the Tidal login action runs `python3 -u`. get_credentials.py
+    block-buffers stdout when it is a pipe, so the login URL stayed in the
+    child while it waited for the user and the web UI showed "(no output)".
+  * web: an action's output stops being recorded once its link is printed —
+    past that point a login helper prints the credential it just obtained
+    (upmpdcli's dumps the Tidal access and refresh tokens), and none of that
+    belongs in a page. Draining continues, so the child never wedges.
+  * dac: the managed block resets `dtoverlay=` before `dtparam=audio=`. A
+    dtparam applies to the last overlay loaded above it, so from the end of
+    config.txt ours landed on vc4-kms-v3d instead of the base DTB:
+    snd_bcm2835 never loaded and onboard audio was a dummy output. Shipped
+    in beta.4, recorded here.
+
+ -- Mathieu Réquillart <mathieu.requillart@gmail.com>  Tue, 01 Sep 2026 14:00:00 +0200
+
+odioctl (0.1.0~beta.4) unstable; urgency=medium
+
+  * upgrade: `check` can target an odios pre-release, with `--version pr-84`
+    or ODIOCTL_ODIOS_VERSION in /etc/default/odioctl (read by the daily timer
+    and by `odioctl web`). Until now a box installed from a PR build compared
+    itself to the published manifest, which knows nothing of the roles that
+    build ships, so enabling one of them never went pending. Only a release
+    tag is accepted, never a URL, and `apply` re-validates the tag it reads
+    from upgrades.json before it reaches `curl … | bash`.
+  * components: the Tidal plugin offers its login as an action, running
+    upmpdcli's own get_credentials.py so the operator needs no shell.
+
+ -- Mathieu Réquillart <mathieu.requillart@gmail.com>  Tue, 01 Sep 2026 10:00:00 +0200
+
+odioctl (0.1.0~beta.3) unstable; urgency=medium
+
+  * sudoers: grant a new `odioctl` system group instead of `odio`. `odio`
+    carries read/write on /var/lib/odio/state.json and odios also puts the
+    installing user in it, so keying passwordless root on it turned a
+    state-access group into a root group. The package creates `odioctl`
+    empty; odios adds only its target user.
+  * Upgrading an existing box needs that user added to the new group, and
+    the membership only reaches its systemd --user session on the next
+    login — until then odio-upgrade.service fails at sudo.
+
+ -- Mathieu Réquillart <mathieu.requillart@gmail.com>  Mon, 31 Aug 2026 12:00:00 +0200
+
+odioctl (0.1.0~beta.2) unstable; urgency=medium
+
+  * components: qbzd (Qobuz Connect) is in the catalog. install.sh asks
+    [y/N] for it, so absent from both state lists means off, and enabling it
+    records the explicit INSTALL_QBZD=Y instead of relying on a default Y.
+  * components: a catalog entry can declare actions — commands the web UI
+    runs as the target user so the operator needs no shell on the box. The
+    output comes back in a modal, still without JavaScript. First one is
+    `qbzd login`, which hands over the Qobuz sign-in link.
+
+ -- Mathieu Réquillart <mathieu.requillart@gmail.com>  Sat, 29 Aug 2026 15:50:00 +0200
+
+odioctl (0.1.0~beta.1) unstable; urgency=medium
 
   * Initial release: `odioctl upgrade check|apply|verify` extracted from
     odios' odio_upgrade.py (current state.json schema only, no legacy),
     `odioctl components`, `odioctl dac`, `odioctl web`, systemd --user
     units and a sudoers fragment for the `odio` group.
 
- -- Mathieu Réquillart <mathieu.requillart@gmail.com>  Tue, 18 Aug 2026 18:00:00 +0200
+ -- Mathieu Réquillart <mathieu.requillart@gmail.com>  Fri, 28 Aug 2026 22:00:00 +0200
