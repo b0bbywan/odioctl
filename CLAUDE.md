@@ -54,7 +54,7 @@ Extracted from odios' `installer/ansible/roles/upgrade/files/odio_upgrade.py`.
   hence `target_tag` next to `latest` in upgrades.json.
 - **The web UI is server-rendered HTML forms only** — no JSON API, no JavaScript.
   Markup lives in `web/templates/*.html` (`string.Template`, `$name` placeholders,
-  values escaped in `web/server.py`), styling in `web/static/style.css` which
+  values escaped in `web/render.py`), styling in `web/static/style.css` which
   hand-mirrors odio-ui's look (go-odio-api: forest zinc palette, lime accent) so
   both pages on the box feel like one product — keep it in sync, no Tailwind/htmx.
   A POST re-renders the page (no redirects, no query-string state).
@@ -90,6 +90,8 @@ Local .deb build (needs a Debian toolchain — use `podman run debian:trixie`):
 ## Layout
 
 `src/odioctl/{versions,state,manifest,netinfo,fsutil,components,dac,cli}.py`,
-`upgrade/{check,apply,verify}.py`, `web/{server.py,templates/,static/}`;
+`upgrade/{check,apply,verify}.py`, `web/{config,services,render,server}.py`
+(paths and ports → what the forms do → the HTML → routes, socket activation,
+CLI; that is also the import order, no cycles) plus `web/{templates,static}/`;
 `data/` (systemd --user units, sudoers), `debian/`, `tests/` (unittest-style
 classes run by pytest, `tests/_helpers.py` builds states, `tests/fixtures/`).

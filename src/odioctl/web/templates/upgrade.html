@@ -1,0 +1,9 @@
+<section>
+<h2>Upgrade</h2>
+<p class="hint">Runs <code>odioctl upgrade apply</code> as root through <code>odio-upgrade.service</code>; the box keeps playing but services restart along the way.</p>
+<ul class="pending">$items</ul>
+<div class="row">
+  <form method="post" action="/upgrade"><input type="hidden" name="token" value="$token"><button class="primary" type="submit">Apply now</button></form>
+  <a class="badge" href="$ui_url">progress in odio-ui</a>
+</div>
+</section>
