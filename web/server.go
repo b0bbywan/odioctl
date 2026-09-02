@@ -196,20 +196,30 @@ func hostOf(r *http.Request) string {
 	return host
 }
 
-// RunServe binds and serves until SIGTERM/SIGINT.
+// RunServe serves until SIGTERM/SIGINT, on the socket systemd passed when
+// there is one, binding for itself otherwise.
 func RunServe(stdout, stderr io.Writer, cfg Config) int {
-	ln, err := net.Listen("tcp", fmt.Sprintf("%s:%d", cfg.Bind, cfg.Port))
-	if err != nil {
+	ln, err := SystemdListener()
+	switch {
+	case err != nil:
 		fmt.Fprintf(stderr, "odioctl web: %v\n", err)
 		return 2
-	}
-	ip := cfg.Bind
-	if ip == "0.0.0.0" || ip == "::" {
-		if ip = netinfo.DefaultRouteIP(); ip == "" {
-			ip = "127.0.0.1"
+	case ln != nil:
+		port := ln.Addr().(*net.TCPAddr).Port
+		fmt.Fprintf(stdout, "Serving odioctl web UI on the socket passed by systemd (port %d)\n", port)
+	default:
+		if ln, err = net.Listen("tcp", fmt.Sprintf("%s:%d", cfg.Bind, cfg.Port)); err != nil {
+			fmt.Fprintf(stderr, "odioctl web: %v\n", err)
+			return 2
 		}
+		ip := cfg.Bind
+		if ip == "0.0.0.0" || ip == "::" {
+			if ip = netinfo.DefaultRouteIP(); ip == "" {
+				ip = "127.0.0.1"
+			}
+		}
+		fmt.Fprintf(stdout, "Serving odioctl web UI on http://%s:%d\n", ip, cfg.Port)
 	}
-	fmt.Fprintf(stdout, "Serving odioctl web UI on http://%s:%d\n", ip, cfg.Port)
 	return serveUntilSignal(stderr, ln, NewHandler(NewServices(cfg, Runners{})))
 }
 
