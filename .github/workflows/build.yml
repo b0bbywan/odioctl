@@ -1,0 +1,123 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.25'
+      - name: gofmt
+        run: test -z "$(gofmt -l . | tee /dev/stderr)"
+      - name: golangci-lint
+        if: always()
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.5.0
+          args: --timeout=5m
+      - name: sudoers matches DAC catalog
+        if: always()
+        run: make check-sudoers
+      - name: sudoers syntax
+        if: always()
+        run: sudo visudo -cf data/sudoers/odioctl
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.25'
+      - name: go test
+        run: go test -race ./...
+
+  deb:
+    needs: [lint, test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # git describe needs the tags
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.25'
+      - name: Install nfpm
+        run: go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.43.1
+      - name: Build the .debs (amd64, armhf, arm64)
+        run: make deb
+      - name: Install and smoke test
+        run: |
+          sudo apt-get install -y ./dist/odioctl_*_amd64.deb
+          odioctl --version
+          odioctl upgrade apply --help >/dev/null
+          cat > /tmp/state.json <<'EOF'
+          {"odios": "2026.5.0", "install_mode": "image", "target_user": "odio",
+           "roles": {"mpd": "2026.5.0"}, "roles_excluded": [], "features": [],
+           "features_excluded": [], "release_history": ["2026.5.0"]}
+          EOF
+          # `check` only ever fetches a github.com release manifest: assert the
+          # shipped binary refuses a tag that escapes that path.
+          odioctl upgrade check --state /tmp/state.json \
+            --version '../../evil' --output /tmp/upgrades.json 2>&1 | grep -q 'not a release tag'
+          odioctl upgrade apply --dry-run --force --state /tmp/state.json
+          odioctl upgrade verify --state /tmp/state.json --expected-version 2026.5.0
+          odioctl components --state /tmp/state.json list
+          odioctl dac list >/dev/null
+          test -f /usr/lib/systemd/user/odio-upgrade.service
+          test -f /usr/lib/systemd/user/odioctl-web.service
+          test -f /usr/lib/systemd/user/odioctl-web.socket
+          sudo visudo -cf /etc/sudoers.d/odioctl
+          sudo stat -c '%a' /etc/sudoers.d/odioctl | grep -qx 440
+          getent group odioctl
+      - uses: actions/upload-artifact@v7
+        with:
+          name: odioctl-deb
+          path: dist/*.deb
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v7
+        with:
+          name: odioctl-bin
+          path: dist/odioctl-linux-*
+          if-no-files-found: error
+          retention-days: 7
+
+  # Release + APT reindex live in odio-ci (shared with the other packaging
+  # repos). Only the .debs are attached: the package is the distribution.
+  release:
+    needs: [deb]
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    uses: b0bbywan/odio-ci/.github/workflows/release.yml@v1.0.3
+    with:
+      artifact_pattern: odioctl-deb
+    secrets:
+      apt_repo_token: ${{ secrets.APT_REPO_TOKEN }}
+
+  # odio-ci's release only attaches the .debs; append the bare binaries to the
+  # same release — install.sh-less consumers (a dev box, a container) curl one.
+  release-binaries:
+    needs: [release]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: odioctl-bin
+          path: dist/
+      - uses: softprops/action-gh-release@v3
+        with:
+          files: dist/odioctl-linux-*

@@ -20,6 +20,8 @@ goarch_arm64 := GOARCH=arm64
 lint:
 	test -z "$$(gofmt -l . | tee /dev/stderr)"
 	go vet ./...
+	@if command -v golangci-lint >/dev/null; then golangci-lint run; \
+	else echo "golangci-lint not installed, skipped (CI runs it)"; fi
 
 test:
 	go test ./...
