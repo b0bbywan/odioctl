@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>odio Settings</title>
+<link rel="icon" type="image/png" href="/static/logo.png">
+<link rel="stylesheet" href="/static/style.css?v={{.Version}}">
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <div class="brand">
+      <a href="{{.UIURL}}" title="odio player"><img src="/static/logo.png" alt="odio logo"></a>
+      <div>
+        <h1>Settings</h1>
+        <p>{{.Hostname}}</p>
+      </div>
+    </div>
+    <div class="links">
+      {{if .Odios}}<span class="badge">odio {{.Odios}}</span>{{end}}
+    </div>
+  </div>
+</header>
+<main class="wrap">
+{{range .Banners}}{{template "banner.html" .}}
+{{end}}{{template "upgrade.html" .Upgrade}}
+{{template "components.html" .Components}}
+{{template "dac.html" .Dac}}
+</main>
+{{if .Modal}}{{template "modal.html" .Modal}}{{end}}
+<footer>
+  <div class="wrap">
+    <div>odioctl {{.Version}}</div>
+    <div><a href="https://docs.odio.love/operations/settings/" target="_blank" rel="noopener noreferrer">docs.odio.love</a></div>
+  </div>
+</footer>
+</body>
+</html>
