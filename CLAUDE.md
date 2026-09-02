@@ -96,8 +96,8 @@ make deb     # cross-compiles amd64/armhf/arm64 and packages via nfpm
 
 ## Layout
 
-`versions`, `state`, `manifest`, `netinfo`, `fsutil`, `components`, `dac`
-(+ `dac/gen`, the sudoers generator), `upgrade` (check/apply/verify), `web`
+`versions`, `state`, `manifest`, `netinfo`, `fsutil`, `procutil`, `components`,
+`dac` (+ `dac/gen`, the sudoers generator), `upgrade` (check/apply/verify), `web`
 (config, services, action, render, server, socket + `templates/`, `static/`),
 `cli`, `main.go` — that is also the import order, no cycles. `config/` holds
 the ldflags-injected version. `data/` (systemd --user units, sudoers),
