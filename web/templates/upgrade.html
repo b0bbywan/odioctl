@@ -1,0 +1,10 @@
+<section>
+<h2>Upgrade</h2>
+{{if not .Checked}}<div class="banner warn">No upgrade check has run yet (odio-check-upgrade.timer).</div>{{else if not .Available}}<p class="hint">{{.UpToDate}}</p>{{else}}
+<p class="hint">Runs <code>odioctl upgrade apply</code> as root through <code>odio-upgrade.service</code>; the box keeps playing but services restart along the way.</p>
+<ul class="pending">{{range .Items}}<li>{{.}}</li>{{end}}</ul>
+<div class="row">
+  <form method="post" action="/upgrade"><input type="hidden" name="token" value="{{.Token}}"><button class="primary" type="submit">Apply now</button></form>
+  <a class="badge" href="{{.UIURL}}">progress in odio-ui</a>
+</div>
+{{end}}</section>
