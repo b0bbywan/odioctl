@@ -1,0 +1,7 @@
+<div class="scrim">
+  <div class="modal" role="dialog" aria-modal="true" aria-label="{{.Title}}">
+    <h2>{{.Title}}</h2>
+    <pre>{{.Output}}</pre>
+    <div class="row">{{if .URL}}<a class="btn primary" href="{{.URL}}" target="_blank" rel="noreferrer noopener">{{.LinkLabel}}</a>{{end}}<a class="btn" href="/">Close</a></div>
+  </div>
+</div>

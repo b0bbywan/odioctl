@@ -1,0 +1,11 @@
+<section>
+<h2>DAC</h2>
+{{if not .Supported}}<div class="banner warn">No config.txt found — DAC selection is only available on Raspberry Pi.</div>{{else}}
+<p class="hint">Selects the <code>dtoverlay</code> line in <code>config.txt</code>. Takes effect after a reboot.</p>
+<div class="row">
+  <form method="post" action="/dac" class="row"><input type="hidden" name="token" value="{{.Token}}"><select name="id">{{range .Options}}<option value="{{.ID}}"{{if .Disabled}} disabled{{end}}{{if .Selected}} selected{{end}}>{{.Text}}</option>{{end}}</select><button class="primary" type="submit">Apply</button></form>
+  {{if .Managed}}<form method="post" action="/dac/unset"><input type="hidden" name="token" value="{{.Token}}"><button type="submit" title="Remove the odioctl block and restore the previous config.txt lines">Reset</button></form>{{end}}
+</div>
+<p class="hint">{{.Current}}</p>
+{{if .Stray}}<div class="banner warn">{{.Stray}}</div>{{end}}
+{{end}}</section>
