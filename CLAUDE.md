@@ -40,7 +40,14 @@ since rewritten in Go.
   `/var/lib/odio`), and odios puts the installing user in it too. `odioctl` is
   the one the sudoers fragment grants root to, created empty by the postinst
   and joined only by the target user. Never key a sudoers rule on `odio`:
-  that would make every state reader a root user.
+  that would make every state reader a root user. The rules say `%:odioctl`
+  with `Defaults group_plugin=system_group.so`: the callers are `--user`
+  units, and plain `%group` is matched against the calling process's group
+  vector, which a user manager started before the membership landed (linger
+  on first boot, a migration on a live box) never has. `%:` resolves through
+  `/etc/group` instead. `upgrade apply --progress` also names
+  `XDG_RUNTIME_DIR=/run/user/<target uid>` itself rather than trusting sudo's
+  `env_keep`, so the odio_progress callback finds odio-api's socket either way.
 - **upgrades.json is the contract with odio-ui and `upgrade apply`.** `check`
   sets `upgrade_available` on a version bump *or* on `pending_components`
   (enabled-but-not-installed, see `components.Pending`); the web UI calls
