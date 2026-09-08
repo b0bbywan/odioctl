@@ -25,7 +25,7 @@ func TestFileMatchesCatalog(t *testing.T) {
 
 func TestNoWildcards(t *testing.T) {
 	for _, line := range strings.Split(fragment(t), "\n") {
-		if strings.HasPrefix(line, "%odioctl") && strings.ContainsAny(line, "*?") {
+		if strings.HasPrefix(line, "%:odioctl") && strings.ContainsAny(line, "*?") {
 			t.Errorf("wildcard in %q", line)
 		}
 	}
@@ -39,8 +39,11 @@ func TestGrantsTheOdioctlGroupOnly(t *testing.T) {
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
+		if line == "Defaults group_plugin=system_group.so" {
+			continue // resolves %:odioctl from /etc/group, grants nothing
+		}
 		rules++
-		if !strings.HasPrefix(line, "%odioctl ") && !strings.HasPrefix(line, "Defaults:%odioctl ") {
+		if !strings.HasPrefix(line, "%:odioctl ") && !strings.HasPrefix(line, "Defaults:%:odioctl ") {
 			t.Errorf("rule for someone else: %q", line)
 		}
 	}

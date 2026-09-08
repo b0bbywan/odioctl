@@ -7,6 +7,7 @@ import (
 	"maps"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -36,6 +37,15 @@ func OdioAPIListening() bool {
 	}
 	_, err := os.Stat(filepath.Join(runtime, "odio-api", "upgrade.sock"))
 	return err == nil
+}
+
+// lookupUID resolves a user name to its uid; a var so tests can pin it.
+var lookupUID = func(name string) (string, error) {
+	u, err := user.Lookup(name)
+	if err != nil {
+		return "", err
+	}
+	return u.Uid, nil
 }
 
 // DeriveInstallEnv emits INSTALL_X=N for the *_excluded lists and Y for
@@ -132,6 +142,13 @@ func buildApplyEnv(w io.Writer, st state.State, version, targetUser string, man 
 	}
 	if opts.Progress {
 		env["ODIOS_PROGRESS"] = "Y"
+		// The callback looks for odio-api's socket under XDG_RUNTIME_DIR;
+		// under sudo that is dropped or the caller's, so name the target's.
+		if uid, err := lookupUID(targetUser); err == nil {
+			env["XDG_RUNTIME_DIR"] = "/run/user/" + uid
+		} else {
+			fmt.Fprintf(w, "  progress: cannot resolve %s's uid (%v), leaving XDG_RUNTIME_DIR to the environment\n", targetUser, err)
+		}
 	}
 
 	var skipped []string
