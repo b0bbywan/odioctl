@@ -376,7 +376,7 @@ func TestFinishedRunBecomesANoteOnTheNextRender(t *testing.T) {
 		t.Fatal("run still alive")
 	}
 	_, body = f.get("/")
-	wants(t, body, "Log in to Qobuz: Done.")
+	wants(t, body, `<small class="action">Log in to Qobuz: Done.`)
 	if strings.Contains(body, "qobuz.test/oauth") {
 		t.Error("link survived the end of the run")
 	}
@@ -395,7 +395,7 @@ func TestFailureShowsTheOutputInTheModal(t *testing.T) {
 	if strings.Contains(body, "scrim") {
 		t.Error("modal survived the reload")
 	}
-	wants(t, body, "Log in to Qobuz: Failed (exit 3). qbzd: cannot reach qobuz")
+	wants(t, body, `<small class="action err">Log in to Qobuz: Failed (exit 3). qbzd: cannot reach qobuz`)
 }
 
 func TestStuckRunIsNotRespawnedWhileBeingStopped(t *testing.T) {

@@ -132,12 +132,18 @@ func (r *actionRun) result(action components.Action) *ActionResult {
 	}
 }
 
-// note sums up a finished run for the page: "Done.", or the failure with the
-// tail of what it printed.
-func (r *actionRun) note() string {
+// actionNote is the outcome of a finished run, as the row shows it: "Done.",
+// or the failure with the tail of what it printed — flagged so it is painted
+// as one.
+type actionNote struct {
+	Text   string
+	Failed bool
+}
+
+func (r *actionRun) note() actionNote {
 	code := r.proc.ExitCode()
 	if code == 0 {
-		return "Done."
+		return actionNote{Text: "Done."}
 	}
 	var parts []string
 	for _, line := range strings.Split(r.text(), "\n") {
@@ -149,5 +155,8 @@ func (r *actionRun) note() string {
 	if len(detail) > 200 {
 		detail = detail[len(detail)-200:]
 	}
-	return strings.TrimSpace(fmt.Sprintf("Failed (exit %d). %s", code, detail))
+	return actionNote{
+		Text:   strings.TrimSpace(fmt.Sprintf("Failed (exit %d). %s", code, detail)),
+		Failed: true,
+	}
 }

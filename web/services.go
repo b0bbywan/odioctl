@@ -87,7 +87,7 @@ type Services struct {
 	// Started actions outlive their request: `qbzd login` waits up to 300s
 	// for the user to follow its link.
 	runs  map[actionKey]*actionRun
-	notes map[actionKey]string
+	notes map[actionKey]actionNote
 }
 
 func NewServices(cfg Config, r Runners) *Services {
@@ -105,7 +105,7 @@ func NewServices(cfg Config, r Runners) *Services {
 		run:   r,
 		token: newToken(),
 		runs:  map[actionKey]*actionRun{},
-		notes: map[actionKey]string{},
+		notes: map[actionKey]actionNote{},
 	}
 }
 
@@ -254,7 +254,7 @@ func (s *Services) RunAction(kind components.Kind, name, id, host string) (strin
 // ActionState is the (pending link, note) of one action — ("", "") when it
 // never ran. Reaps a finished run into the note the next render shows: no
 // JavaScript here, the operator reloads to see the end.
-func (s *Services) ActionState(kind components.Kind, name, id string) (url, note string) {
+func (s *Services) ActionState(kind components.Kind, name, id string) (url string, note actionNote) {
 	key := actionKey{kind, name, id}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -263,7 +263,7 @@ func (s *Services) ActionState(kind components.Kind, name, id string) (url, note
 		return "", s.notes[key]
 	}
 	if run.alive() {
-		return run.link(), ""
+		return run.link(), actionNote{}
 	}
 	delete(s.runs, key)
 	s.notes[key] = run.note()
