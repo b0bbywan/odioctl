@@ -224,6 +224,7 @@ section h3 {
   color: var(--zinc-300);
 }
 .card .content small.action a { color: var(--lime); }
+.card .content small.action.err { color: var(--red); }
 
 .card .meta {
   display: flex;
