@@ -232,6 +232,14 @@ func TestBuildApplyEnvReinstall(t *testing.T) {
 }
 
 func TestBuildApplyEnvProgress(t *testing.T) {
+	old := lookupUID
+	lookupUID = func(name string) (string, error) {
+		if name != "alice" {
+			t.Errorf("lookupUID(%q), want alice", name)
+		}
+		return "1001", nil
+	}
+	t.Cleanup(func() { lookupUID = old })
 	st := makeState()
 	st.Roles = map[string]string{"mpd": "2026.5.0"}
 	m := runManifest(map[string]string{"mpd": "2026.5.0"})
@@ -239,9 +247,32 @@ func TestBuildApplyEnvProgress(t *testing.T) {
 	if env["ODIOS_PROGRESS"] != "Y" {
 		t.Errorf("env = %v", env)
 	}
+	// The callback's socket lives in the target user's runtime dir, which sudo
+	// does not reliably keep: apply names it itself.
+	if env["XDG_RUNTIME_DIR"] != "/run/user/1001" {
+		t.Errorf("env = %v", env)
+	}
 	env, _ = applyEnv(t, st, ApplyOptions{}, m)
 	if _, ok := env["ODIOS_PROGRESS"]; ok {
 		t.Errorf("env = %v", env)
+	}
+	if _, ok := env["XDG_RUNTIME_DIR"]; ok {
+		t.Errorf("env = %v", env)
+	}
+}
+
+func TestBuildApplyEnvProgressWithoutAUID(t *testing.T) {
+	old := lookupUID
+	lookupUID = func(string) (string, error) { return "", os.ErrNotExist }
+	t.Cleanup(func() { lookupUID = old })
+	st := makeState()
+	st.Roles = map[string]string{"mpd": "2026.5.0"}
+	env, out := applyEnv(t, st, ApplyOptions{Progress: true}, runManifest(map[string]string{"mpd": "2026.5.0"}))
+	if _, ok := env["XDG_RUNTIME_DIR"]; ok || env["ODIOS_PROGRESS"] != "Y" {
+		t.Errorf("env = %v", env)
+	}
+	if !strings.Contains(out, "cannot resolve alice's uid") {
+		t.Errorf("out = %q", out)
 	}
 }
 
