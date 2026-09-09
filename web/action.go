@@ -18,6 +18,8 @@ const maxOutputLines = 20
 
 type actionRun struct {
 	proc      ActionProcess
+	argv      []string
+	started   time.Time
 	scheme    string // the stdout token to surface as a link
 	linkLabel string
 	title     string
@@ -46,6 +48,8 @@ func startAction(spawn func([]string) (ActionProcess, error), action components.
 	}
 	run := &actionRun{
 		proc:      proc,
+		argv:      argv,
+		started:   time.Now(),
 		scheme:    action.LinkScheme,
 		linkLabel: action.LinkLabel,
 		title:     action.Label,
@@ -110,6 +114,8 @@ func (r *actionRun) awaitLink(timeout time.Duration) string {
 
 func (r *actionRun) alive() bool { return r.proc.Alive() }
 
+func (r *actionRun) elapsed() time.Duration { return time.Since(r.started).Round(time.Second) }
+
 func (r *actionRun) link() string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -132,9 +138,8 @@ func (r *actionRun) result(action components.Action) *ActionResult {
 	}
 }
 
-// actionNote is the outcome of a finished run, as the row shows it: "Done.",
-// or the failure with the tail of what it printed — flagged so it is painted
-// as one.
+// actionNote is the outcome of a finished run: success (the row shows a Done
+// badge where the link was), or the failure with the tail of what it printed.
 type actionNote struct {
 	Text   string
 	Failed bool

@@ -70,8 +70,11 @@ since rewritten in Go.
   group-writable and its tag ends up in a `curl … | bash` run as root. The tag
   and the version are two strings: `pr-84` publishes `2026.7.0rc2-9-gcad916c`,
   hence `target_tag` next to `latest` in upgrades.json.
-- **The web UI is server-rendered HTML forms only** — no JSON API, no
-  JavaScript. Markup lives in `web/templates/*.html` (`html/template`:
+- **The web UI is server-rendered HTML forms only** — no JSON API. The one
+  script, `web/static/app.js`, is loaded only while something runs: it
+  listens to `GET /events` (SSE, one `change` when a run ends) and reloads
+  the page with a GET. It never renders anything and never POSTs; forms stay
+  the way to act. Markup lives in `web/templates/*.html` (`html/template`:
   composition via `{{range}}`/`{{if}}`/`{{template}}` stays in the templates,
   Go builds view models only, escaping is the engine's), styling in
   `web/static/style.css` which hand-mirrors odio-ui's look (go-odio-api:
@@ -86,9 +89,10 @@ since rewritten in Go.
   process runs it as the target user (no sudo) and does *not* wait for it:
   such a command prints a URL and then keeps running until the user has
   followed it, so odioctl reads stdout only until the `https://` link. The
-  output comes back in a modal — still no JS: the POST response carries it and
-  `Close` is a link to `/`, so it shows once. What persists is the row's own
-  link while the process lives, then a note with the exit code. Offered for
+  output comes back in a modal: the POST response carries it and `Close` is a
+  link to `/`, so it shows once. What persists is the row's own link while
+  the process lives, then a Done badge or the failure with its exit code —
+  the page flips by itself, `app.js` reloads it on the exit. Offered for
   installed components only. qbzd's `login` is the first one: it prints its
   Qobuz URL, then holds a one-shot listener for 300s waiting for the browser
   to come back to `{host}`. Tidal's runs upmpdcli's own `get_credentials.py`,
