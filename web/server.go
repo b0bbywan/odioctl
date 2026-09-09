@@ -82,14 +82,11 @@ func (h *handler) events(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
-	// The page only asks while something runs; if it ended in between, say
-	// so now rather than leave the tab waiting for an event already gone.
-	if !h.svc.Busy() {
-		fmt.Fprint(w, "event: change\ndata: done\n\n")
-		flusher.Flush()
+	// Send at once: the page only asks while something runs, and it may
+	// have ended between its render and this connection.
+	if h.sendFragments(w, flusher) {
 		return
 	}
-	flusher.Flush()
 	ping := time.NewTicker(15 * time.Second)
 	defer ping.Stop()
 	for {
@@ -97,14 +94,37 @@ func (h *handler) events(w http.ResponseWriter, r *http.Request) {
 		case <-r.Context().Done():
 			return
 		case <-ch:
-			fmt.Fprint(w, "event: change\ndata: action\n\n")
-			flusher.Flush()
-			return
+			if h.sendFragments(w, flusher) {
+				return
+			}
 		case <-ping.C:
 			fmt.Fprint(w, ": ping\n\n")
 			flusher.Flush()
 		}
 	}
+}
+
+// sendFragments writes every fragment, then "end" when nothing runs any
+// more — decided before rendering, so an end after it still wakes this
+// loop; true when the stream is over.
+func (h *handler) sendFragments(w io.Writer, flusher http.Flusher) (over bool) {
+	over = !h.svc.Busy()
+	frags, err := RenderFragments(h.svc)
+	if err != nil {
+		h.svc.log.Printf("events: %v", err)
+	}
+	for _, f := range frags {
+		fmt.Fprint(w, "event: fragment\n")
+		for _, line := range strings.Split(strings.TrimSpace(f), "\n") {
+			fmt.Fprintf(w, "data: %s\n", line)
+		}
+		fmt.Fprint(w, "\n")
+	}
+	if over {
+		fmt.Fprint(w, "event: end\ndata: -\n\n")
+	}
+	flusher.Flush()
+	return over
 }
 
 // -- the form actions ----------------------------------------------------
