@@ -88,10 +88,11 @@ since rewritten in Go.
 - **The web UI is server-rendered HTML forms only** — no JSON API. The one
   script, `web/static/app.js`, is loaded only while something runs: it
   listens to `GET /events` (SSE) and swaps in the *fragments* the server
-  sends on a change — the upgrade card, the rows with actions, the modal of
-  a finished action, each rendered by the page's own templates
-  (`web.RenderFragments`) and replaced by the `id` on its root element —
-  until `end` says nothing runs. It never builds markup and never POSTs;
+  sends on a change — the banner strip (minus the POST's own message: the
+  card or row it announced now shows the outcome), the upgrade card, the
+  rows with actions, the modal of a finished action, each rendered by the
+  page's own templates (`web.RenderFragments`) and replaced by the `id` on
+  its root element — until `end` says nothing runs. It never builds markup and never POSTs;
   forms stay the way to act. Markup lives in `web/templates/*.html` (`html/template`:
   composition via `{{range}}`/`{{if}}`/`{{template}}` stays in the templates,
   Go builds view models only, escaping is the engine's), styling in

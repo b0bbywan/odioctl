@@ -24,8 +24,8 @@
   </div>
 </header>
 <main class="wrap">
-{{range .Banners}}{{template "banner.html" .}}
-{{end}}{{template "upgrade.html" .Upgrade}}
+{{template "banners.html" .Banners}}
+{{template "upgrade.html" .Upgrade}}
 {{template "components.html" .Components}}
 {{template "dac.html" .Dac}}
 </main>

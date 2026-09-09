@@ -293,9 +293,26 @@ func modalView(res *ActionResult) *ActionResult {
 	return &m
 }
 
-// RenderFragments is what app.js swaps in on a change: the upgrade card,
-// every row with actions, and the modal of each finished action — each a
-// root element carrying its id, from the same templates as the page.
+// bannersOf is the page's banner strip: the POST's outcome or error, then
+// what holds across renders (the reboot warning).
+func bannersOf(p PageData, d dac.Status) []bannerView {
+	var out []bannerView
+	for _, b := range []bannerView{{"ok", p.Message}, {"err", p.Error}} {
+		if b.Text != "" {
+			out = append(out, b)
+		}
+	}
+	if d.RebootRequired {
+		out = append(out, bannerView{"warn", "A reboot is required to apply the DAC change."})
+	}
+	return out
+}
+
+// RenderFragments is what app.js swaps in on a change: the banner strip
+// (without the POST's message — the card or row it announced now shows the
+// outcome), the upgrade card, every row with actions, and the modal of each
+// finished action — each a root element carrying its id, from the same
+// templates as the page.
 func RenderFragments(svc *Services) ([]string, error) {
 	var out []string
 	add := func(name string, data any) error {
@@ -305,6 +322,9 @@ func RenderFragments(svc *Services) ([]string, error) {
 		}
 		out = append(out, b.String())
 		return nil
+	}
+	if err := add("banners.html", bannersOf(PageData{}, svc.DacStatus())); err != nil {
+		return nil, err
 	}
 	if err := add("upgrade.html", upgradeViewOf(svc, svc.UpgradeReport())); err != nil {
 		return nil, err
@@ -370,15 +390,7 @@ func RenderPage(svc *Services, p PageData) (string, error) {
 	if st != nil {
 		view.Odios = st.Odios
 	}
-	for _, b := range []bannerView{{"ok", p.Message}, {"err", p.Error}} {
-		if b.Text != "" {
-			view.Banners = append(view.Banners, b)
-		}
-	}
-	if d.RebootRequired {
-		view.Banners = append(view.Banners,
-			bannerView{"warn", "A reboot is required to apply the DAC change."})
-	}
+	view.Banners = bannersOf(p, d)
 	// From the view itself, so the script and what it waits for cannot
 	// disagree: a run ending between the two would leave a stuck page.
 	view.Live = view.Upgrade.Running
