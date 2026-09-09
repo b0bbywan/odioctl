@@ -129,12 +129,13 @@ func (r *actionRun) text() string {
 	return strings.Join(r.output, "")
 }
 
-func (r *actionRun) result(action components.Action) *ActionResult {
+func (r *actionRun) result() *ActionResult {
+	r.settle()
 	return &ActionResult{
-		Title:     action.Label,
+		Title:     r.title,
 		Output:    r.text(),
 		URL:       r.link(),
-		LinkLabel: action.LinkLabel,
+		LinkLabel: r.linkLabel,
 	}
 }
 
@@ -145,11 +146,22 @@ type actionNote struct {
 	Failed bool
 }
 
+// settle waits for the link or EOF before the output is read: the exit is
+// reaped before the drain has the last line. Bounded, a grandchild could
+// keep the pipe open for ever.
+func (r *actionRun) settle() {
+	select {
+	case <-r.found:
+	case <-time.After(500 * time.Millisecond):
+	}
+}
+
 func (r *actionRun) note() actionNote {
 	code := r.proc.ExitCode()
 	if code == 0 {
 		return actionNote{Text: "Done."}
 	}
+	r.settle()
 	var parts []string
 	for _, line := range strings.Split(r.text(), "\n") {
 		if t := strings.TrimSpace(line); t != "" {

@@ -1,7 +1,8 @@
 package web
 
 // The HTTP end of the settings UI: routes and the server. Plain HTML forms
-// (POST re-renders the page), no JavaScript, no JSON API. Runs as the target
+// (POST re-renders the page), no JSON API; the one script listens on
+// /events while something runs. Runs as the target
 // user (systemd --user unit). No authentication: same LAN trust model as
 // odio-api. Every form carries a per-process token so a cross-site HTML form
 // cannot drive the box.
@@ -66,7 +67,7 @@ func (h *handler) static(w http.ResponseWriter, r *http.Request) {
 }
 
 // events is the live channel behind static/app.js: one SSE "change" event
-// when something the page shows has changed (an action exited), and the
+// when something the page shows has changed (an action or the upgrade ended), and the
 // script reloads the page — the server still renders everything. The stream
 // lives as long as the tab; a comment every 15s keeps idle proxies from
 // dropping it.
@@ -83,7 +84,7 @@ func (h *handler) events(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	// The page only asks while something runs; if it ended in between, say
 	// so now rather than leave the tab waiting for an event already gone.
-	if !h.svc.ActionRunning() {
+	if !h.svc.Busy() {
 		fmt.Fprint(w, "event: change\ndata: done\n\n")
 		flusher.Flush()
 		return
