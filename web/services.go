@@ -287,6 +287,18 @@ func (s *Services) ActionState(kind components.Kind, name, id string) (url strin
 	return "", s.notes[key]
 }
 
+// ActionRunning reports whether any started action is still alive.
+func (s *Services) ActionRunning() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, run := range s.runs {
+		if run.alive() {
+			return true
+		}
+	}
+	return false
+}
+
 // StartUpgrade starts the odio-upgrade user unit
 // (= `sudo odioctl upgrade apply --progress`).
 func (s *Services) StartUpgrade() (string, error) {

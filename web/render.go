@@ -109,6 +109,7 @@ type pageView struct {
 	Components               componentsView
 	Dac                      dacView
 	Modal                    *ActionResult
+	Refresh                  int // seconds until the page reloads itself (0 = never)
 }
 
 // (chip text, button label) per component status; the button performs the
@@ -341,6 +342,15 @@ func RenderPage(svc *Services, p PageData) (string, error) {
 	if d.RebootRequired {
 		view.Banners = append(view.Banners,
 			bannerView{"warn", "A reboot is required to apply the DAC change."})
+	}
+	// No JS: while an action runs, the page reloads itself (a GET of /, never
+	// a re-POST) so the row turns into Done without a hand on F5. The modal
+	// gets longer, its link is what the operator is reading.
+	if svc.ActionRunning() {
+		view.Refresh = 5
+		if view.Modal != nil {
+			view.Refresh = 30
+		}
 	}
 
 	var b strings.Builder

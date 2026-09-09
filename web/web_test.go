@@ -329,13 +329,14 @@ func TestActionLinkIsLiftedOffStdoutAndShown(t *testing.T) {
 		"kind": {"role"}, "name": {"qbzd"}, "action": {"login"},
 	}, true)
 	wants(t, body, "https://qobuz.test/oauth?id=1", "open the link below to finish",
-		"Open the Qobuz sign-in page")
+		"Open the Qobuz sign-in page", `<meta http-equiv="refresh" content="30; url=/">`)
 	if len(f.spawns) != 1 || f.spawns[0][0] != "qbzd" {
 		t.Errorf("spawns = %v", f.spawns)
 	}
-	// the row keeps the link on the next page load, while the process lives
+	// the row keeps the link on the next page load, while the process lives,
+	// and the page keeps reloading itself until it is gone
 	_, body = f.get("/")
-	wants(t, body, "https://qobuz.test/oauth?id=1")
+	wants(t, body, "https://qobuz.test/oauth?id=1", `<meta http-equiv="refresh" content="5; url=/">`)
 }
 
 func TestActionHostReachesTheArgv(t *testing.T) {
@@ -400,6 +401,9 @@ func TestFinishedRunBecomesANoteOnTheNextRender(t *testing.T) {
 	wants(t, body, `<small class="action"><span class="chip installed">Done</span></small>`)
 	if strings.Contains(body, "qobuz.test/oauth") {
 		t.Error("link survived the end of the run")
+	}
+	if strings.Contains(body, `http-equiv="refresh"`) {
+		t.Error("page still reloads itself after the run")
 	}
 	// the exit line is written by the reaper goroutine, give it a moment
 	deadline := time.Now().Add(2 * time.Second)
