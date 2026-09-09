@@ -112,7 +112,7 @@ type pageView struct {
 	Components               componentsView
 	Dac                      dacView
 	Modal                    *ActionResult
-	Live                     bool // something runs: load app.js, which reloads on /events
+	Live                     bool // something runs: load app.js, which swaps in what /events sends
 }
 
 // (chip text, button label) per component status; the button performs the
@@ -294,6 +294,54 @@ func upgradeViewOf(svc *Services, report *upgrade.Report) upgradeView {
 	return view
 }
 
+func modalView(res *ActionResult) *ActionResult {
+	if res == nil {
+		return nil
+	}
+	m := *res
+	m.Output = strings.TrimSpace(m.Output)
+	if m.Output == "" {
+		m.Output = "(no output)"
+	}
+	return &m
+}
+
+// RenderFragments is what app.js swaps in on a change: the upgrade card,
+// every row with actions, and the modal of each finished action — each a
+// root element carrying its id, from the same templates as the page.
+func RenderFragments(svc *Services) ([]string, error) {
+	var out []string
+	add := func(name string, data any) error {
+		var b strings.Builder
+		if err := templates.ExecuteTemplate(&b, name, data); err != nil {
+			return err
+		}
+		out = append(out, b.String())
+		return nil
+	}
+	if err := add("upgrade.html", upgradeViewOf(svc, svc.UpgradeReport())); err != nil {
+		return nil, err
+	}
+	if st, err := svc.ReadState(); err == nil {
+		for _, g := range componentsViewOf(svc, &st, "").Groups {
+			for _, row := range g.Rows {
+				if len(row.Actions) == 0 {
+					continue
+				}
+				if err := add("component_row.html", row); err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
+	for _, res := range svc.FinishedResults() {
+		if err := add("modal.html", modalView(res)); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
 // PageData tunes one render of the page: the outcome banner or error of a
 // POST, its modal, and the Host header the browser used.
 type PageData struct {
@@ -331,14 +379,7 @@ func RenderPage(svc *Services, p PageData) (string, error) {
 		Components: componentsViewOf(svc, st, stateErr),
 		Dac:        dacViewOf(svc, d),
 	}
-	if p.Result != nil {
-		m := *p.Result
-		m.Output = strings.TrimSpace(m.Output)
-		if m.Output == "" {
-			m.Output = "(no output)"
-		}
-		view.Modal = &m
-	}
+	view.Modal = modalView(p.Result)
 	if st != nil {
 		view.Odios = st.Odios
 	}

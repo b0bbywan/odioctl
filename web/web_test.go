@@ -341,7 +341,7 @@ func TestActionLinkIsLiftedOffStdoutAndShown(t *testing.T) {
 	wants(t, body, "https://qobuz.test/oauth?id=1", `<script src="/static/app.js`)
 }
 
-func TestEventsStreamSaysChangeWhenTheActionExits(t *testing.T) {
+func TestEventsStreamSendsFragmentsUntilTheActionExits(t *testing.T) {
 	f := newFixture(t)
 	f.installQbzd()
 	f.script = "echo 'https://qobuz.test/oauth?id=1'; sleep 0.5"
@@ -355,17 +355,29 @@ func TestEventsStreamSaysChangeWhenTheActionExits(t *testing.T) {
 	if ct := resp.Header.Get("Content-Type"); ct != "text/event-stream" {
 		t.Errorf("Content-Type = %q", ct)
 	}
-	body, _ := io.ReadAll(resp.Body) // the stream ends on the change
-	wants(t, string(body), "event: change\ndata: action\n\n")
+	body, _ := io.ReadAll(resp.Body) // the stream ends with the run
+	wants(t, string(body),
+		"event: fragment\ndata: <div id=\"row-role-qbzd\" class=\"card\">",
+		`<span class="chip installed">Done</span>`,
+		"event: fragment\ndata: <div id=\"modal-role-qbzd-login\" class=\"scrim\">",
+		`<button class="primary" type="button" disabled>Done</button>`,
+		"event: fragment\ndata: <section id=\"upgrade\">",
+		"event: end\ndata: -\n\n")
+	// the first batch, sent on connect, still had the link; the last has not
+	last := string(body)[strings.LastIndex(string(body), "event: fragment\ndata: <div id=\"row-role-qbzd\""):]
+	if strings.Contains(last, `href="https://qobuz.test`) {
+		t.Error("the link survived the end of the run")
+	}
 
-	// nothing running any more: told at once, no waiting for an event gone by
+	// nothing running any more: the current state and end at once, no
+	// waiting for an event gone by
 	resp, err = http.Get(f.srv.URL + "/events")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
 	body, _ = io.ReadAll(resp.Body)
-	wants(t, string(body), "event: change\ndata: done\n\n")
+	wants(t, string(body), "event: fragment\n", "event: end\n")
 	_, page := f.get("/")
 	if strings.Contains(page, "app.js") {
 		t.Error("script still loaded after the run")
@@ -621,7 +633,8 @@ func TestApplyNowStartsAndWatchesTheUserUnit(t *testing.T) {
 	defer resp.Body.Close()
 	unit.set("inactive", "success", 0)
 	stream, _ := io.ReadAll(resp.Body)
-	wants(t, string(stream), "event: change\ndata: action\n\n")
+	wants(t, string(stream), "event: fragment\ndata: <section id=\"upgrade\">",
+		"Upgrade: Done.", "Apply now", "event: end\n")
 	if !f.waitWatcherGone() {
 		t.Fatal("watcher still running")
 	}

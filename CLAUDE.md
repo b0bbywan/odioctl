@@ -79,9 +79,12 @@ since rewritten in Go.
   hence `target_tag` next to `latest` in upgrades.json.
 - **The web UI is server-rendered HTML forms only** — no JSON API. The one
   script, `web/static/app.js`, is loaded only while something runs: it
-  listens to `GET /events` (SSE, one `change` when a run ends) and reloads
-  the page with a GET. It never renders anything and never POSTs; forms stay
-  the way to act. Markup lives in `web/templates/*.html` (`html/template`:
+  listens to `GET /events` (SSE) and swaps in the *fragments* the server
+  sends on a change — the upgrade card, the rows with actions, the modal of
+  a finished action, each rendered by the page's own templates
+  (`web.RenderFragments`) and replaced by the `id` on its root element —
+  until `end` says nothing runs. It never builds markup and never POSTs;
+  forms stay the way to act. Markup lives in `web/templates/*.html` (`html/template`:
   composition via `{{range}}`/`{{if}}`/`{{template}}` stays in the templates,
   Go builds view models only, escaping is the engine's), styling in
   `web/static/style.css` which hand-mirrors odio-ui's look (go-odio-api:
@@ -99,7 +102,7 @@ since rewritten in Go.
   output comes back in a modal: the POST response carries it and `Close` is a
   link to `/`, so it shows once. What persists is the row's own link while
   the process lives, then a Done badge or the failure with its exit code —
-  the page flips by itself, `app.js` reloads it on the exit. Offered for
+  `app.js` swaps the row and the modal in on the exit. Offered for
   installed components only. qbzd's `login` is the first one: it prints its
   Qobuz URL, then holds a one-shot listener for 300s waiting for the browser
   to come back to `{host}`. Tidal's runs upmpdcli's own `get_credentials.py`,
