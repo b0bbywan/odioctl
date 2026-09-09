@@ -18,6 +18,7 @@ const maxOutputLines = 20
 
 type actionRun struct {
 	proc      ActionProcess
+	id        string // the modal's element id (actionKey.domID)
 	argv      []string
 	started   time.Time
 	scheme    string // the stdout token to surface as a link
@@ -129,14 +130,17 @@ func (r *actionRun) text() string {
 	return strings.Join(r.output, "")
 }
 
+// result is the modal: the link while the process lives, Done once it has
+// exited cleanly, the output either way.
 func (r *actionRun) result() *ActionResult {
 	r.settle()
-	return &ActionResult{
-		Title:     r.title,
-		Output:    r.text(),
-		URL:       r.link(),
-		LinkLabel: r.linkLabel,
+	res := &ActionResult{ID: r.id, Title: r.title, Output: r.text(), LinkLabel: r.linkLabel}
+	if r.alive() {
+		res.URL = r.link()
+	} else {
+		res.Done = r.proc.ExitCode() == 0
 	}
+	return res
 }
 
 // actionNote is the outcome of a finished run: success (the row shows a Done

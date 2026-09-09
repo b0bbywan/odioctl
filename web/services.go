@@ -80,7 +80,9 @@ type Runners struct {
 // response — it never reaches another client or the next page load; what
 // outlives the request is the row's own link.
 type ActionResult struct {
+	ID                            string // element id, so a later fragment replaces this modal
 	Title, Output, URL, LinkLabel string
+	Done                          bool // exited 0: a Done button where the link was
 }
 
 type actionKey struct {
@@ -88,6 +90,10 @@ type actionKey struct {
 	name string
 	id   string
 }
+
+// domID names the modal of this action in the page, so a fragment for its
+// end replaces that one and no other.
+func (k actionKey) domID() string { return fmt.Sprintf("modal-%s-%s-%s", k.kind, k.name, k.id) }
 
 // Services holds the business operations behind the pages (also
 // unit-testable directly).
@@ -100,8 +106,10 @@ type Services struct {
 	mu sync.Mutex
 	// Started actions outlive their request: `qbzd login` waits up to 300s
 	// for the user to follow its link.
-	runs  map[actionKey]*actionRun
-	notes map[actionKey]actionNote
+	runs map[actionKey]*actionRun
+	// Reaped runs, kept for their note (the row) and their output (the
+	// modal that showed their link gets its end the same way).
+	finished map[actionKey]*actionRun
 	// A watcher polls odio-upgrade.service to its end; how the last one ended.
 	watching    bool
 	upgradeNote actionNote
@@ -127,10 +135,10 @@ func NewServices(cfg Config, r Runners) *Services {
 		run:   r,
 		token: newToken(),
 		// journald stamps the lines itself; under `go run` the shell does.
-		log:   log.New(r.Log, "", 0),
-		runs:  map[actionKey]*actionRun{},
-		notes: map[actionKey]actionNote{},
-		subs:  map[chan struct{}]struct{}{},
+		log:      log.New(r.Log, "", 0),
+		runs:     map[actionKey]*actionRun{},
+		finished: map[actionKey]*actionRun{},
+		subs:     map[chan struct{}]struct{}{},
 	}
 }
 
@@ -272,12 +280,13 @@ func (s *Services) RunAction(kind components.Kind, name, id, host string) (strin
 		s.log.Printf("action %s/%s: already running (pid %d), showing its link again", name, id, run.proc.Pid())
 		return action.Label + ": already running — the link is below.", run.result(), nil
 	}
-	delete(s.notes, key)
+	delete(s.finished, key)
 	run, err := startAction(s.run.Spawn, action, host, s.cfg.Home)
 	if err != nil {
 		s.mu.Unlock()
 		return "", nil, err
 	}
+	run.id = key.domID()
 	s.runs[key] = run
 	s.mu.Unlock()
 	s.log.Printf("action %s/%s: spawned pid %d: %s", name, id, run.proc.Pid(), strings.Join(run.argv, " "))
@@ -319,14 +328,29 @@ func (s *Services) ActionState(kind components.Kind, name, id string) (url strin
 	defer s.mu.Unlock()
 	run, ok := s.runs[key]
 	if !ok {
-		return "", s.notes[key]
+		if done := s.finished[key]; done != nil {
+			return "", done.note()
+		}
+		return "", actionNote{}
 	}
 	if run.alive() {
 		return run.link(), actionNote{}
 	}
 	delete(s.runs, key)
-	s.notes[key] = run.note()
-	return "", s.notes[key]
+	s.finished[key] = run
+	return "", run.note()
+}
+
+// FinishedResults is the end of every reaped action, for the modal that
+// showed its link: the same output, a Done button where the link was.
+func (s *Services) FinishedResults() []*ActionResult {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []*ActionResult
+	for _, run := range s.finished {
+		out = append(out, run.result())
+	}
+	return out
 }
 
 // Busy reports whether anything followed — an action, the upgrade — is still
