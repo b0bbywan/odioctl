@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -33,6 +34,25 @@ type fixture struct {
 	userCalls  [][]string
 	spawns     [][]string
 	script     string
+	logs       syncBuf
+}
+
+// syncBuf collects the log: the exit line comes from a goroutine.
+type syncBuf struct {
+	mu sync.Mutex
+	b  strings.Builder
+}
+
+func (s *syncBuf) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *syncBuf) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -71,6 +91,7 @@ func newFixture(t *testing.T) *fixture {
 			f.spawns = append(f.spawns, argv)
 			return defaultSpawn([]string{"sh", "-c", f.script})
 		},
+		Log: &f.logs,
 	})
 	f.srv = httptest.NewServer(NewHandler(f.svc))
 	t.Cleanup(f.srv.Close)
@@ -376,10 +397,22 @@ func TestFinishedRunBecomesANoteOnTheNextRender(t *testing.T) {
 		t.Fatal("run still alive")
 	}
 	_, body = f.get("/")
-	wants(t, body, `<small class="action">Log in to Qobuz: Done.`)
+	wants(t, body, `<small class="action"><span class="chip installed">Done</span></small>`)
 	if strings.Contains(body, "qobuz.test/oauth") {
 		t.Error("link survived the end of the run")
 	}
+	// the exit line is written by the reaper goroutine, give it a moment
+	deadline := time.Now().Add(2 * time.Second)
+	for !strings.Contains(f.logs.String(), "exited 0") && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	wants(t, f.logs.String(),
+		"POST /components/action from ",
+		"action qbzd/login: spawned pid ",
+		": qbzd login --callback-host ",
+		"action qbzd/login: link after ",
+		"https://qobuz.test/oauth?id=1",
+		"exited 0 after ")
 }
 
 func TestFailureShowsTheOutputInTheModal(t *testing.T) {

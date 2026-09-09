@@ -54,8 +54,8 @@ type bannerView struct{ Kind, Text string }
 type actionView struct {
 	ID, Button               string
 	URL, LinkLabel, LinkNote string // pending link, when URL is set
-	Note                     string // outcome of the last finished run
-	Failed                   bool   // …and whether it is one to paint red
+	Done                     bool   // the last run succeeded: a badge where the link was
+	Note                     string // …or how it failed, painted red
 }
 
 type rowView struct {
@@ -156,8 +156,10 @@ func rowViewOf(svc *Services, c components.Component, child bool) rowView {
 			if av.LinkNote == "" {
 				av.LinkNote = "started"
 			}
+		case note.Failed:
+			av.Note = a.Label + ": " + note.Text
 		case note.Text != "":
-			av.Note, av.Failed = a.Label+": "+note.Text, note.Failed
+			av.Done = true
 		}
 		row.Actions = append(row.Actions, av)
 	}

@@ -11,6 +11,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"strings"
 	"sync"
@@ -49,6 +50,7 @@ type RunFn func(args []string) (RunResult, error)
 // ActionProcess is one started component action, as the services see it.
 type ActionProcess interface {
 	Output() io.Reader // combined stdout+stderr
+	Pid() int
 	Alive() bool
 	ExitCode() int                // valid once !Alive()
 	WaitFor(d time.Duration) bool // true when the process exited within d
@@ -61,6 +63,7 @@ type Runners struct {
 	Privileged RunFn // sudo -n odioctl …
 	User       RunFn // same user, no sudo (systemctl --user)
 	Spawn      func(argv []string) (ActionProcess, error)
+	Log        io.Writer // what the process did, one line each; nil → stderr
 }
 
 // ActionResult is what an action just did, shown in the modal of the POST
@@ -82,6 +85,7 @@ type Services struct {
 	cfg   Config
 	run   Runners
 	token string
+	log   *log.Logger
 
 	mu sync.Mutex
 	// Started actions outlive their request: `qbzd login` waits up to 300s
@@ -100,10 +104,15 @@ func NewServices(cfg Config, r Runners) *Services {
 	if r.Spawn == nil {
 		r.Spawn = defaultSpawn
 	}
+	if r.Log == nil {
+		r.Log = os.Stderr
+	}
 	return &Services{
 		cfg:   cfg,
 		run:   r,
 		token: newToken(),
+		// journald stamps the lines itself; under `go run` the shell does.
+		log:   log.New(r.Log, "", 0),
 		runs:  map[actionKey]*actionRun{},
 		notes: map[actionKey]actionNote{},
 	}
@@ -218,6 +227,7 @@ func (s *Services) RunAction(kind components.Kind, name, id, host string) (strin
 	s.mu.Lock()
 	if run, ok := s.runs[key]; ok && run.alive() {
 		s.mu.Unlock()
+		s.log.Printf("action %s/%s: already running (pid %d), showing its link again", name, id, run.proc.Pid())
 		return action.Label + ": already running — the link is below.", run.result(action), nil
 	}
 	delete(s.notes, key)
@@ -228,10 +238,17 @@ func (s *Services) RunAction(kind components.Kind, name, id, host string) (strin
 	}
 	s.runs[key] = run
 	s.mu.Unlock()
+	s.log.Printf("action %s/%s: spawned pid %d: %s", name, id, run.proc.Pid(), strings.Join(run.argv, " "))
+	go func() { // the exit, when it happens — the row only learns it on the next render
+		code := run.proc.ExitCode()
+		s.log.Printf("action %s/%s: pid %d exited %d after %s", name, id, run.proc.Pid(), code, run.elapsed())
+	}()
 
 	if url := run.awaitLink(actionLinkTimeout); url != "" {
+		s.log.Printf("action %s/%s: link after %s: %s", name, id, run.elapsed(), url)
 		return action.Label + ": open the link below to finish.", run.result(action), nil
 	}
+	s.log.Printf("action %s/%s: no link after %s, output so far: %q", name, id, run.elapsed(), run.text())
 
 	// No link: either it died (reap it for the exit code — stdout can close a
 	// moment before the process does) or it is stuck and we stop it. The

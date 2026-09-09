@@ -145,6 +145,7 @@ func (h *handler) form(action formAction) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		form, err := h.readForm(r)
 		if err != nil {
+			h.svc.log.Printf("POST %s from %s: %v", r.URL.Path, r.RemoteAddr, err)
 			if errors.Is(err, errBadToken) {
 				sendStatus(w, http.StatusForbidden, "<p>"+errBadToken.Error()+"</p>")
 				return
@@ -154,6 +155,7 @@ func (h *handler) form(action formAction) http.HandlerFunc {
 		}
 		msg, result, err := action(form, hostOf(r))
 		if err != nil {
+			h.svc.log.Printf("POST %s from %s: error: %v", r.URL.Path, r.RemoteAddr, err)
 			p := PageData{Error: err.Error(), Host: hostOf(r)}
 			var ue *UserError
 			if errors.As(err, &ue) {
@@ -162,6 +164,7 @@ func (h *handler) form(action formAction) http.HandlerFunc {
 			h.servePage(w, http.StatusOK, p)
 			return
 		}
+		h.svc.log.Printf("POST %s from %s: %s", r.URL.Path, r.RemoteAddr, msg)
 		h.servePage(w, http.StatusOK, PageData{Message: msg, Result: result, Host: hostOf(r)})
 	}
 }
@@ -221,7 +224,7 @@ func RunServe(stdout, stderr io.Writer, cfg Config) int {
 		}
 		fmt.Fprintf(stdout, "Serving odioctl web UI on http://%s:%d\n", ip, cfg.Port)
 	}
-	return serveUntilSignal(stderr, ln, NewHandler(NewServices(cfg, Runners{})))
+	return serveUntilSignal(stderr, ln, NewHandler(NewServices(cfg, Runners{Log: stderr})))
 }
 
 func serveUntilSignal(stderr io.Writer, ln net.Listener, h http.Handler) int {
