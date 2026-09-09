@@ -77,13 +77,13 @@ func (h *handler) events(w http.ResponseWriter, r *http.Request) {
 		sendStatus(w, http.StatusInternalServerError, "")
 		return
 	}
-	ch, cancel := h.svc.Subscribe()
-	defer cancel()
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
 	// Send at once: the page only asks while something runs, and it may
-	// have ended between its render and this connection.
+	// have ended between its render and this connection. The wake channel
+	// is taken before each render, so an end after it still fires.
+	wake := h.svc.Wake()
 	if h.sendFragments(w, flusher) {
 		return
 	}
@@ -93,7 +93,8 @@ func (h *handler) events(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-r.Context().Done():
 			return
-		case <-ch:
+		case <-wake:
+			wake = h.svc.Wake()
 			if h.sendFragments(w, flusher) {
 				return
 			}

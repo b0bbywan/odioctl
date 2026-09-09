@@ -108,8 +108,9 @@ type Services struct {
 	// A watcher polls odio-upgrade.service to its end; how the last one ended.
 	watching    bool
 	upgradeNote actionNote
-	// Open /events streams, each told once when something changed.
-	subs map[chan struct{}]struct{}
+	// Closed when something the page shows has changed, then replaced: an
+	// /events stream waits on it and takes the next one.
+	wake chan struct{}
 }
 
 func NewServices(cfg Config, r Runners) *Services {
@@ -133,34 +134,24 @@ func NewServices(cfg Config, r Runners) *Services {
 		log:      log.New(r.Log, "", 0),
 		runs:     map[actionKey]*actionRun{},
 		finished: map[actionKey]*actionRun{},
-		subs:     map[chan struct{}]struct{}{},
+		wake:     make(chan struct{}),
 	}
 }
 
-// Subscribe hands out a channel that gets one value when something the page
-// shows has changed; cancel drops it.
-func (s *Services) Subscribe() (ch <-chan struct{}, cancel func()) {
-	c := make(chan struct{}, 1)
+// Wake is the channel closed on the next change; take it before reading
+// what it guards, and a fresh one once it has fired.
+func (s *Services) Wake() <-chan struct{} {
 	s.mu.Lock()
-	s.subs[c] = struct{}{}
-	s.mu.Unlock()
-	return c, func() {
-		s.mu.Lock()
-		delete(s.subs, c)
-		s.mu.Unlock()
-	}
+	defer s.mu.Unlock()
+	return s.wake
 }
 
-// changed wakes every subscriber; a buffered channel coalesces bursts.
+// changed wakes every waiter at once: close, then a new channel for the next.
 func (s *Services) changed() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for c := range s.subs {
-		select {
-		case c <- struct{}{}:
-		default:
-		}
-	}
+	close(s.wake)
+	s.wake = make(chan struct{})
 }
 
 func newToken() string {
