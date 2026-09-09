@@ -329,7 +329,7 @@ func TestActionLinkIsLiftedOffStdoutAndShown(t *testing.T) {
 		"kind": {"role"}, "name": {"qbzd"}, "action": {"login"},
 	}, true)
 	wants(t, body, "https://qobuz.test/oauth?id=1", "open the link below to finish",
-		"Open the Qobuz sign-in page", `<meta http-equiv="refresh" content="30; url=/">`)
+		"Open the Qobuz sign-in page", `<meta http-equiv="refresh" content="10; url=/">`)
 	if len(f.spawns) != 1 || f.spawns[0][0] != "qbzd" {
 		t.Errorf("spawns = %v", f.spawns)
 	}

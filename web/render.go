@@ -349,7 +349,7 @@ func RenderPage(svc *Services, p PageData) (string, error) {
 	if svc.ActionRunning() {
 		view.Refresh = 5
 		if view.Modal != nil {
-			view.Refresh = 30
+			view.Refresh = 10
 		}
 	}
 
