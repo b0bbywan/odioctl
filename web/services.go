@@ -92,6 +92,8 @@ type Services struct {
 	// for the user to follow its link.
 	runs  map[actionKey]*actionRun
 	notes map[actionKey]actionNote
+	// Open /events streams, each told once when something changed.
+	subs map[chan struct{}]struct{}
 }
 
 func NewServices(cfg Config, r Runners) *Services {
@@ -115,6 +117,33 @@ func NewServices(cfg Config, r Runners) *Services {
 		log:   log.New(r.Log, "", 0),
 		runs:  map[actionKey]*actionRun{},
 		notes: map[actionKey]actionNote{},
+		subs:  map[chan struct{}]struct{}{},
+	}
+}
+
+// Subscribe hands out a channel that gets one value when something the page
+// shows has changed; cancel drops it.
+func (s *Services) Subscribe() (ch <-chan struct{}, cancel func()) {
+	c := make(chan struct{}, 1)
+	s.mu.Lock()
+	s.subs[c] = struct{}{}
+	s.mu.Unlock()
+	return c, func() {
+		s.mu.Lock()
+		delete(s.subs, c)
+		s.mu.Unlock()
+	}
+}
+
+// changed wakes every subscriber; a buffered channel coalesces bursts.
+func (s *Services) changed() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for c := range s.subs {
+		select {
+		case c <- struct{}{}:
+		default:
+		}
 	}
 }
 
@@ -239,9 +268,10 @@ func (s *Services) RunAction(kind components.Kind, name, id, host string) (strin
 	s.runs[key] = run
 	s.mu.Unlock()
 	s.log.Printf("action %s/%s: spawned pid %d: %s", name, id, run.proc.Pid(), strings.Join(run.argv, " "))
-	go func() { // the exit, when it happens — the row only learns it on the next render
+	go func() { // the exit, when it happens: logged, and the open pages told
 		code := run.proc.ExitCode()
 		s.log.Printf("action %s/%s: pid %d exited %d after %s", name, id, run.proc.Pid(), code, run.elapsed())
+		s.changed()
 	}()
 
 	if url := run.awaitLink(actionLinkTimeout); url != "" {

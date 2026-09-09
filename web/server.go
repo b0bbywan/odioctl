@@ -41,6 +41,7 @@ func NewHandler(svc *Services) http.Handler {
 	mux.HandleFunc("GET /{$}", h.page)
 	mux.HandleFunc("GET /index.html", h.page)
 	mux.HandleFunc("GET /static/{name}", h.static)
+	mux.HandleFunc("GET /events", h.events)
 	mux.HandleFunc("POST /components", h.form(h.setComponent))
 	mux.HandleFunc("POST /components/action", h.form(h.componentAction))
 	mux.HandleFunc("POST /dac", h.form(h.setDAC))
@@ -62,6 +63,47 @@ func (h *handler) static(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", ctype)
 	w.Header().Set("Cache-Control", "public, max-age=86400")
 	_, _ = w.Write(content)
+}
+
+// events is the live channel behind static/app.js: one SSE "change" event
+// when something the page shows has changed (an action exited), and the
+// script reloads the page — the server still renders everything. The stream
+// lives as long as the tab; a comment every 15s keeps idle proxies from
+// dropping it.
+func (h *handler) events(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		sendStatus(w, http.StatusInternalServerError, "")
+		return
+	}
+	ch, cancel := h.svc.Subscribe()
+	defer cancel()
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
+	// The page only asks while something runs; if it ended in between, say
+	// so now rather than leave the tab waiting for an event already gone.
+	if !h.svc.ActionRunning() {
+		fmt.Fprint(w, "event: change\ndata: done\n\n")
+		flusher.Flush()
+		return
+	}
+	flusher.Flush()
+	ping := time.NewTicker(15 * time.Second)
+	defer ping.Stop()
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-ch:
+			fmt.Fprint(w, "event: change\ndata: action\n\n")
+			flusher.Flush()
+			return
+		case <-ping.C:
+			fmt.Fprint(w, ": ping\n\n")
+			flusher.Flush()
+		}
+	}
 }
 
 // -- the form actions ----------------------------------------------------

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>odio Settings</title>
-{{if .Refresh}}<meta http-equiv="refresh" content="{{.Refresh}}; url=/">{{end}}
+{{if .Live}}<script src="/static/app.js?v={{.Version}}" defer></script>{{end}}
 <link rel="icon" type="image/png" href="/static/logo.png">
 <link rel="stylesheet" href="/static/style.css?v={{.Version}}">
 </head>

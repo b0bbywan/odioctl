@@ -24,7 +24,7 @@ import (
 //go:embed templates/*.html
 var templatesFS embed.FS
 
-//go:embed static/style.css static/logo.png
+//go:embed static/style.css static/logo.png static/app.js
 var staticFS embed.FS
 
 var templates = template.Must(template.ParseFS(templatesFS, "templates/*.html"))
@@ -32,6 +32,7 @@ var templates = template.Must(template.ParseFS(templatesFS, "templates/*.html"))
 var staticTypes = map[string]string{
 	"style.css": "text/css; charset=utf-8",
 	"logo.png":  "image/png",
+	"app.js":    "text/javascript; charset=utf-8",
 }
 
 // StaticAsset is the (content, media type) of a file under static/, or ok=false.
@@ -109,7 +110,7 @@ type pageView struct {
 	Components               componentsView
 	Dac                      dacView
 	Modal                    *ActionResult
-	Refresh                  int // seconds until the page reloads itself (0 = never)
+	Live                     bool // something runs: load app.js, which reloads on /events
 }
 
 // (chip text, button label) per component status; the button performs the
@@ -343,15 +344,7 @@ func RenderPage(svc *Services, p PageData) (string, error) {
 		view.Banners = append(view.Banners,
 			bannerView{"warn", "A reboot is required to apply the DAC change."})
 	}
-	// No JS: while an action runs, the page reloads itself (a GET of /, never
-	// a re-POST) so the row turns into Done without a hand on F5. The modal
-	// gets longer, its link is what the operator is reading.
-	if svc.ActionRunning() {
-		view.Refresh = 5
-		if view.Modal != nil {
-			view.Refresh = 10
-		}
-	}
+	view.Live = svc.ActionRunning()
 
 	var b strings.Builder
 	if err := templates.ExecuteTemplate(&b, "page.html", view); err != nil {
