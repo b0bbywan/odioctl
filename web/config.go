@@ -1,5 +1,5 @@
 // Package web serves the odioctl settings UI: server-rendered HTML forms
-// only — no JSON API, no JavaScript. Runs as the odios target user; only
+// only — no JSON API; app.js only reloads on /events. Runs as the odios target user; only
 // config.txt writes escalate, through `sudo -n odioctl dac …`.
 package web
 

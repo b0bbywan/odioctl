@@ -1,6 +1,7 @@
 package web
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -35,6 +36,7 @@ type fixture struct {
 	spawns     [][]string
 	script     string
 	logs       syncBuf
+	unit       *fakeUnit // set by useUnit
 }
 
 // syncBuf collects the log: the exit line comes from a goroutine.
@@ -525,15 +527,155 @@ func TestUpgradeSection(t *testing.T) {
 	}
 }
 
-func TestApplyNowStartsTheUserUnit(t *testing.T) {
-	f := newFixture(t)
-	// make an upgrade pending: enable qbzd (opt-in, shipped by the manifest)
+// makeUpgradePending enables qbzd (opt-in, shipped by the manifest).
+func (f *fixture) makeUpgradePending() {
 	f.post("/components", url.Values{"kind": {"role"}, "name": {"qbzd"}, "enabled": {"1"}}, true)
+}
+
+// fakeUnit stands in for systemd's view of odio-upgrade.service: `show`
+// answers from it, `start` flips it to activating. Guarded: the watcher
+// polls from its own goroutine.
+type fakeUnit struct {
+	mu     sync.Mutex
+	active string // activating, inactive, failed
+	result string
+	code   int
+}
+
+func (u *fakeUnit) set(active, result string, code int) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.active, u.result, u.code = active, result, code
+}
+
+// useUnit answers the User runner from u; the watcher polls from its own
+// goroutine, so the calls it records are read back under u's lock.
+func (f *fixture) useUnit(u *fakeUnit) {
+	f.unit = u
+	f.svc.run.User = func(args []string) (RunResult, error) {
+		u.mu.Lock()
+		defer u.mu.Unlock()
+		f.userCalls = append(f.userCalls, args)
+		cmd := strings.Join(args, " ")
+		switch {
+		case strings.Contains(cmd, "show"):
+			return RunResult{Stdout: fmt.Sprintf("%s\n%s\n%d\n", u.active, u.result, u.code)}, nil
+		case strings.Contains(cmd, "start"):
+			u.active = "activating"
+		}
+		return RunResult{}, nil
+	}
+	old := upgradePoll
+	upgradePoll = 20 * time.Millisecond
+	f.t.Cleanup(func() { upgradePoll = old })
+}
+
+// starts is every `systemctl … start` the User runner saw, one string each.
+func (f *fixture) starts() (out []string) {
+	f.unit.mu.Lock()
+	defer f.unit.mu.Unlock()
+	for _, call := range f.userCalls {
+		if cmd := strings.Join(call, " "); strings.Contains(cmd, " start ") {
+			out = append(out, cmd)
+		}
+	}
+	return out
+}
+
+func (f *fixture) waitWatcherGone() bool {
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		f.svc.mu.Lock()
+		watching := f.svc.watching
+		f.svc.mu.Unlock()
+		if !watching {
+			return true
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return false
+}
+
+func TestApplyNowStartsAndWatchesTheUserUnit(t *testing.T) {
+	f := newFixture(t)
+	f.makeUpgradePending()
+	unit := &fakeUnit{active: "inactive", result: "success"}
+	f.useUnit(unit)
 	_, body := f.post("/upgrade", url.Values{}, true)
-	wants(t, body, "Upgrade started")
-	if len(f.userCalls) != 1 || !strings.Contains(strings.Join(f.userCalls[0], " "),
-		"systemctl --user start --no-block odio-upgrade.service") {
-		t.Errorf("userCalls = %v", f.userCalls)
+	wants(t, body, "Upgrade started.", "Upgrading…", `<button class="primary" type="button" disabled>`,
+		`<script src="/static/app.js`)
+	if starts := f.starts(); len(starts) != 1 || starts[0] != "systemctl --user start --no-block odio-upgrade.service" {
+		t.Errorf("starts = %v", starts)
+	}
+	// a second click is not a second start
+	_, body = f.post("/upgrade", url.Values{}, true)
+	wants(t, body, "Upgrade already running.")
+	if len(f.starts()) != 1 || len(f.spawns) != 0 {
+		t.Errorf("starts = %v, spawns = %v", f.starts(), f.spawns)
+	}
+	// the unit ends: the watcher notes it, the stream says so, the card shows it
+	resp, err := http.Get(f.srv.URL + "/events")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	unit.set("inactive", "success", 0)
+	stream, _ := io.ReadAll(resp.Body)
+	wants(t, string(stream), "event: change\ndata: action\n\n")
+	if !f.waitWatcherGone() {
+		t.Fatal("watcher still running")
+	}
+	_, body = f.get("/")
+	wants(t, body, `<p class="hint outcome">Upgrade: Done.</p>`, "Apply now")
+	if strings.Contains(body, "app.js") || strings.Contains(body, "Upgrading…") {
+		t.Error("page still shows the run after its end")
+	}
+	wants(t, f.logs.String(), "upgrade: started odio-upgrade.service", "odio-upgrade.service inactive after")
+}
+
+func TestUpgradeFailureIsTheNote(t *testing.T) {
+	f := newFixture(t)
+	f.makeUpgradePending()
+	unit := &fakeUnit{active: "inactive", result: "success"}
+	f.useUnit(unit)
+	f.post("/upgrade", url.Values{}, true)
+	unit.set("failed", "exit-code", 1) // sudoers said no, or the playbook died
+	if !f.waitWatcherGone() {
+		t.Fatal("watcher still running")
+	}
+	_, body := f.get("/")
+	wants(t, body, `<p class="hint outcome err">Upgrade: Failed (exit-code, exit 1).</p>`, "Apply now")
+}
+
+func TestUpgradeStartedElsewhereIsWatchedNeverStarted(t *testing.T) {
+	f := newFixture(t)
+	f.makeUpgradePending()
+	// odio-api started the unit, or this process restarted under it
+	unit := &fakeUnit{active: "activating"}
+	f.useUnit(unit)
+	_, body := f.get("/")
+	wants(t, body, "Upgrading…", `<script src="/static/app.js`)
+	f.get("/") // watched once, not probed again
+	if len(f.starts()) != 0 || len(f.spawns) != 0 {
+		t.Errorf("a render started something: starts = %v, spawns = %v", f.starts(), f.spawns)
+	}
+	wants(t, f.logs.String(), "odio-upgrade.service is activating, watching it")
+	unit.set("failed", "exit-code", 2)
+	if !f.waitWatcherGone() {
+		t.Fatal("watcher still running")
+	}
+	_, body = f.get("/")
+	wants(t, body, "Upgrade: Failed (exit-code, exit 2).")
+}
+
+func TestUnitFailedBeforeThisProcessIsShown(t *testing.T) {
+	f := newFixture(t)
+	f.makeUpgradePending()
+	f.useUnit(&fakeUnit{active: "failed", result: "exit-code", code: 1})
+	_, body := f.get("/")
+	wants(t, body, "Upgrade: Failed (exit-code, exit 1).", "Apply now")
+	if strings.Contains(body, "app.js") {
+		t.Error("nothing runs, nothing to listen to")
 	}
 }
 
