@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -33,6 +34,25 @@ type fixture struct {
 	userCalls  [][]string
 	spawns     [][]string
 	script     string
+	logs       syncBuf
+}
+
+// syncBuf collects the log: the exit line comes from a goroutine.
+type syncBuf struct {
+	mu sync.Mutex
+	b  strings.Builder
+}
+
+func (s *syncBuf) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *syncBuf) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -71,6 +91,7 @@ func newFixture(t *testing.T) *fixture {
 			f.spawns = append(f.spawns, argv)
 			return defaultSpawn([]string{"sh", "-c", f.script})
 		},
+		Log: &f.logs,
 	})
 	f.srv = httptest.NewServer(NewHandler(f.svc))
 	t.Cleanup(f.srv.Close)
@@ -308,13 +329,45 @@ func TestActionLinkIsLiftedOffStdoutAndShown(t *testing.T) {
 		"kind": {"role"}, "name": {"qbzd"}, "action": {"login"},
 	}, true)
 	wants(t, body, "https://qobuz.test/oauth?id=1", "open the link below to finish",
-		"Open the Qobuz sign-in page")
+		"Open the Qobuz sign-in page", `<script src="/static/app.js`)
 	if len(f.spawns) != 1 || f.spawns[0][0] != "qbzd" {
 		t.Errorf("spawns = %v", f.spawns)
 	}
-	// the row keeps the link on the next page load, while the process lives
+	// the row keeps the link on the next page load, while the process lives,
+	// and the page keeps listening for its end
 	_, body = f.get("/")
-	wants(t, body, "https://qobuz.test/oauth?id=1")
+	wants(t, body, "https://qobuz.test/oauth?id=1", `<script src="/static/app.js`)
+}
+
+func TestEventsStreamSaysChangeWhenTheActionExits(t *testing.T) {
+	f := newFixture(t)
+	f.installQbzd()
+	f.script = "echo 'https://qobuz.test/oauth?id=1'; sleep 0.5"
+	f.post("/components/action", url.Values{"kind": {"role"}, "name": {"qbzd"}, "action": {"login"}}, true)
+
+	resp, err := http.Get(f.srv.URL + "/events")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if ct := resp.Header.Get("Content-Type"); ct != "text/event-stream" {
+		t.Errorf("Content-Type = %q", ct)
+	}
+	body, _ := io.ReadAll(resp.Body) // the stream ends on the change
+	wants(t, string(body), "event: change\ndata: action\n\n")
+
+	// nothing running any more: told at once, no waiting for an event gone by
+	resp, err = http.Get(f.srv.URL + "/events")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, _ = io.ReadAll(resp.Body)
+	wants(t, string(body), "event: change\ndata: done\n\n")
+	_, page := f.get("/")
+	if strings.Contains(page, "app.js") {
+		t.Error("script still loaded after the run")
+	}
 }
 
 func TestActionHostReachesTheArgv(t *testing.T) {
@@ -376,10 +429,25 @@ func TestFinishedRunBecomesANoteOnTheNextRender(t *testing.T) {
 		t.Fatal("run still alive")
 	}
 	_, body = f.get("/")
-	wants(t, body, `<small class="action">Log in to Qobuz: Done.`)
+	wants(t, body, `<small class="action"><span class="chip installed">Done</span></small>`)
 	if strings.Contains(body, "qobuz.test/oauth") {
 		t.Error("link survived the end of the run")
 	}
+	if strings.Contains(body, "app.js") {
+		t.Error("page still listens after the run")
+	}
+	// the exit line is written by the reaper goroutine, give it a moment
+	deadline := time.Now().Add(2 * time.Second)
+	for !strings.Contains(f.logs.String(), "exited 0") && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	wants(t, f.logs.String(),
+		"POST /components/action from ",
+		"action qbzd/login: spawned pid ",
+		": qbzd login --callback-host ",
+		"action qbzd/login: link after ",
+		"https://qobuz.test/oauth?id=1",
+		"exited 0 after ")
 }
 
 func TestFailureShowsTheOutputInTheModal(t *testing.T) {

@@ -24,7 +24,7 @@ import (
 //go:embed templates/*.html
 var templatesFS embed.FS
 
-//go:embed static/style.css static/logo.png
+//go:embed static/style.css static/logo.png static/app.js
 var staticFS embed.FS
 
 var templates = template.Must(template.ParseFS(templatesFS, "templates/*.html"))
@@ -32,6 +32,7 @@ var templates = template.Must(template.ParseFS(templatesFS, "templates/*.html"))
 var staticTypes = map[string]string{
 	"style.css": "text/css; charset=utf-8",
 	"logo.png":  "image/png",
+	"app.js":    "text/javascript; charset=utf-8",
 }
 
 // StaticAsset is the (content, media type) of a file under static/, or ok=false.
@@ -54,8 +55,8 @@ type bannerView struct{ Kind, Text string }
 type actionView struct {
 	ID, Button               string
 	URL, LinkLabel, LinkNote string // pending link, when URL is set
-	Note                     string // outcome of the last finished run
-	Failed                   bool   // …and whether it is one to paint red
+	Done                     bool   // the last run succeeded: a badge where the link was
+	Note                     string // …or how it failed, painted red
 }
 
 type rowView struct {
@@ -109,6 +110,7 @@ type pageView struct {
 	Components               componentsView
 	Dac                      dacView
 	Modal                    *ActionResult
+	Live                     bool // something runs: load app.js, which reloads on /events
 }
 
 // (chip text, button label) per component status; the button performs the
@@ -156,8 +158,10 @@ func rowViewOf(svc *Services, c components.Component, child bool) rowView {
 			if av.LinkNote == "" {
 				av.LinkNote = "started"
 			}
+		case note.Failed:
+			av.Note = a.Label + ": " + note.Text
 		case note.Text != "":
-			av.Note, av.Failed = a.Label+": "+note.Text, note.Failed
+			av.Done = true
 		}
 		row.Actions = append(row.Actions, av)
 	}
@@ -340,6 +344,7 @@ func RenderPage(svc *Services, p PageData) (string, error) {
 		view.Banners = append(view.Banners,
 			bannerView{"warn", "A reboot is required to apply the DAC change."})
 	}
+	view.Live = svc.ActionRunning()
 
 	var b strings.Builder
 	if err := templates.ExecuteTemplate(&b, "page.html", view); err != nil {

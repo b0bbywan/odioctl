@@ -82,6 +82,8 @@ func waitCode(cmd *exec.Cmd) int {
 
 func (p *execProcess) Output() io.Reader { return p.out }
 
+func (p *execProcess) Pid() int { return p.cmd.Process.Pid }
+
 func (p *execProcess) Alive() bool {
 	select {
 	case <-p.done:
