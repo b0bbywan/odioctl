@@ -1,10 +1,9 @@
 <section>
 <h2>Upgrade</h2>
-{{if not .Checked}}<div class="banner warn">No upgrade check has run yet (odio-check-upgrade.timer).</div>{{else if not .Available}}<p class="hint">{{.UpToDate}}</p>{{else}}
+{{if .Running}}<p class="hint">Upgrade in progress — services restart along the way; this page refreshes when it is over.</p>
+<button class="primary" type="button" disabled>Upgrading…</button>
+{{else if not .Checked}}<div class="banner warn">No upgrade check has run yet (odio-check-upgrade.timer).</div>{{else if not .Available}}<p class="hint">{{.UpToDate}}</p>{{else}}
 <p class="hint">Runs <code>odioctl upgrade apply</code> as root through <code>odio-upgrade.service</code>; the box keeps playing but services restart along the way.</p>
 <ul class="pending">{{range .Items}}<li>{{.}}</li>{{end}}</ul>
-<div class="row">
-  <form method="post" action="/upgrade"><input type="hidden" name="token" value="{{.Token}}"><button class="primary" type="submit">Apply now</button></form>
-  <a class="badge" href="{{.UIURL}}">progress in odio-ui</a>
-</div>
-{{end}}</section>
+<form method="post" action="/upgrade"><input type="hidden" name="token" value="{{.Token}}"><button class="primary" type="submit">Apply now</button></form>
+{{end}}{{if .Note}}<p class="hint outcome{{if .Failed}} err{{end}}">{{.Note}}</p>{{end}}</section>

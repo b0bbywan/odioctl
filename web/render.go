@@ -96,9 +96,11 @@ type dacView struct {
 type upgradeView struct {
 	Checked   bool // a check has run (upgrades.json exists)
 	Available bool
+	Running   bool   // odio-upgrade.service is being followed: no Apply button
+	Note      string // how the last run ended, "" when none this process saw
+	Failed    bool
 	UpToDate  string
 	Token     string
-	UIURL     string
 	Items     []string
 }
 
@@ -259,16 +261,21 @@ func dacViewOf(svc *Services, d dac.Status) dacView {
 	return view
 }
 
-func upgradeViewOf(svc *Services, report *upgrade.Report, uiURL string) upgradeView {
-	if report == nil {
-		return upgradeView{}
-	}
+func upgradeViewOf(svc *Services, report *upgrade.Report) upgradeView {
+	running, note := svc.UpgradeState(report)
 	view := upgradeView{
-		Checked:   true,
-		Available: report.UpgradeAvailable,
-		Token:     svc.Token(),
-		UIURL:     uiURL,
+		Running: running,
+		Failed:  note.Failed,
 	}
+	if note.Text != "" {
+		view.Note = "Upgrade: " + note.Text
+	}
+	if report == nil {
+		return view
+	}
+	view.Checked = true
+	view.Available = report.UpgradeAvailable
+	view.Token = svc.Token()
 	if !report.UpgradeAvailable {
 		view.UpToDate = fmt.Sprintf("Up to date — odio %s (checked %s).",
 			report.Current, report.CheckedAt)
@@ -320,7 +327,7 @@ func RenderPage(svc *Services, p PageData) (string, error) {
 		Version:    config.AppVersion,
 		UIURL:      uiURL,
 		Hostname:   selfName,
-		Upgrade:    upgradeViewOf(svc, svc.UpgradeReport(), uiURL),
+		Upgrade:    upgradeViewOf(svc, svc.UpgradeReport()),
 		Components: componentsViewOf(svc, st, stateErr),
 		Dac:        dacViewOf(svc, d),
 	}
@@ -344,7 +351,16 @@ func RenderPage(svc *Services, p PageData) (string, error) {
 		view.Banners = append(view.Banners,
 			bannerView{"warn", "A reboot is required to apply the DAC change."})
 	}
-	view.Live = svc.ActionRunning()
+	// From the view itself, so the script and what it waits for cannot
+	// disagree: a run ending between the two would leave a stuck page.
+	view.Live = view.Upgrade.Running
+	for _, g := range view.Components.Groups {
+		for _, row := range g.Rows {
+			for _, a := range row.Actions {
+				view.Live = view.Live || a.URL != ""
+			}
+		}
+	}
 
 	var b strings.Builder
 	if err := templates.ExecuteTemplate(&b, "page.html", view); err != nil {
