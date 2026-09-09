@@ -46,17 +46,23 @@ func startAction(spawn func([]string) (ActionProcess, error), action components.
 	if err != nil {
 		return nil, userErrorf("cannot run %s: %v", strings.Join(argv, " "), err)
 	}
+	return trackRun(proc, argv, action.Label, action.LinkScheme, action.LinkLabel), nil
+}
+
+// trackRun owns a started process: drains its output and keeps the tail.
+// scheme "" means no link is expected (the upgrade follower).
+func trackRun(proc ActionProcess, argv []string, title, scheme, linkLabel string) *actionRun {
 	run := &actionRun{
 		proc:      proc,
 		argv:      argv,
 		started:   time.Now(),
-		scheme:    action.LinkScheme,
-		linkLabel: action.LinkLabel,
-		title:     action.Label,
+		scheme:    scheme,
+		linkLabel: linkLabel,
+		title:     title,
 		found:     make(chan struct{}),
 	}
 	go run.drain()
-	return run, nil
+	return run
 }
 
 // drain reads the output until EOF — a full pipe would wedge the child — but
@@ -72,7 +78,7 @@ func (r *actionRun) drain() {
 		line, err := rd.ReadString('\n')
 		if line != "" && r.link() == "" {
 			r.record(line)
-			if url := findLink(line, r.scheme); url != "" {
+			if url := findLink(line, r.scheme); r.scheme != "" && url != "" {
 				r.mu.Lock()
 				r.url = url
 				r.mu.Unlock()
@@ -129,12 +135,12 @@ func (r *actionRun) text() string {
 	return strings.Join(r.output, "")
 }
 
-func (r *actionRun) result(action components.Action) *ActionResult {
+func (r *actionRun) result() *ActionResult {
 	return &ActionResult{
-		Title:     action.Label,
+		Title:     r.title,
 		Output:    r.text(),
 		URL:       r.link(),
-		LinkLabel: action.LinkLabel,
+		LinkLabel: r.linkLabel,
 	}
 }
 

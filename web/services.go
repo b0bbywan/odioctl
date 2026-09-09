@@ -3,8 +3,9 @@ package web
 // What the pages can ask the box to do — no HTTP, no HTML. One operation per
 // form. state.json is edited in this process; only config.txt writes escalate
 // (`sudo -n odioctl dac …`). Upgrades are never run here: the web process
-// starts odio-upgrade.service, the unit odio-api drives too. Subprocesses go
-// through Runners so tests drive the real code path against stand-ins.
+// starts odio-upgrade.service, the unit odio-api drives too, and follows it
+// to its end. Subprocesses go through Runners so tests drive the real code
+// path against stand-ins.
 
 import (
 	"crypto/rand"
@@ -26,6 +27,10 @@ import (
 // actionLinkTimeout is how long a component action gets to print its link.
 // `qbzd login` fetches an app id over the network first, so it is not instant.
 var actionLinkTimeout = 15 * time.Second
+
+// upgradeStartGrace is how long "Apply now" watches the follower for an
+// immediate refusal before calling the upgrade started.
+var upgradeStartGrace = 2 * time.Second
 
 // UserError is a failure the page shows as an error banner; Modal carries the
 // action's output when there is some to show alongside it.
@@ -92,6 +97,10 @@ type Services struct {
 	// for the user to follow its link.
 	runs  map[actionKey]*actionRun
 	notes map[actionKey]actionNote
+	// The `systemctl --user start` following odio-upgrade.service, and how
+	// the last one ended.
+	upgrade     *actionRun
+	upgradeNote actionNote
 	// Open /events streams, each told once when something changed.
 	subs map[chan struct{}]struct{}
 }
@@ -257,7 +266,7 @@ func (s *Services) RunAction(kind components.Kind, name, id, host string) (strin
 	if run, ok := s.runs[key]; ok && run.alive() {
 		s.mu.Unlock()
 		s.log.Printf("action %s/%s: already running (pid %d), showing its link again", name, id, run.proc.Pid())
-		return action.Label + ": already running — the link is below.", run.result(action), nil
+		return action.Label + ": already running — the link is below.", run.result(), nil
 	}
 	delete(s.notes, key)
 	run, err := startAction(s.run.Spawn, action, host, s.cfg.Home)
@@ -276,7 +285,7 @@ func (s *Services) RunAction(kind components.Kind, name, id, host string) (strin
 
 	if url := run.awaitLink(actionLinkTimeout); url != "" {
 		s.log.Printf("action %s/%s: link after %s: %s", name, id, run.elapsed(), url)
-		return action.Label + ": open the link below to finish.", run.result(action), nil
+		return action.Label + ": open the link below to finish.", run.result(), nil
 	}
 	s.log.Printf("action %s/%s: no link after %s, output so far: %q", name, id, run.elapsed(), run.text())
 
@@ -289,12 +298,12 @@ func (s *Services) RunAction(kind components.Kind, name, id, host string) (strin
 		run.proc.Stop()
 		return "", nil, &UserError{
 			Msg:   fmt.Sprintf("%s: no link after %.0fs", action.Label, actionLinkTimeout.Seconds()),
-			Modal: run.result(action),
+			Modal: run.result(),
 		}
 	}
 	return "", nil, &UserError{
 		Msg:   fmt.Sprintf("%s failed (exit %d)", action.Label, run.proc.ExitCode()),
-		Modal: run.result(action),
+		Modal: run.result(),
 	}
 }
 
@@ -317,10 +326,14 @@ func (s *Services) ActionState(kind components.Kind, name, id string) (url strin
 	return "", s.notes[key]
 }
 
-// ActionRunning reports whether any started action is still alive.
-func (s *Services) ActionRunning() bool {
+// Busy reports whether anything followed — an action, the upgrade — is still
+// alive: the page then loads app.js and waits on /events.
+func (s *Services) Busy() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.upgrade != nil && s.upgrade.alive() {
+		return true
+	}
 	for _, run := range s.runs {
 		if run.alive() {
 			return true
@@ -329,18 +342,87 @@ func (s *Services) ActionRunning() bool {
 	return false
 }
 
-// StartUpgrade starts the odio-upgrade user unit
-// (= `sudo odioctl upgrade apply --progress`).
+// StartUpgrade starts odio-upgrade.service (= `sudo odioctl upgrade apply
+// --progress`) and follows it to its end. A refusal (sudoers, unit missing)
+// shows within a moment and becomes the error; a real run does not.
 func (s *Services) StartUpgrade() (string, error) {
 	report := s.UpgradeReport()
 	if report == nil || !report.UpgradeAvailable {
 		return "", userErrorf("nothing to apply — no upgrade or pending component reported")
 	}
-	args := []string{"systemctl", "--user", "start", "--no-block", UpgradeUnit}
-	if err := runChecked(s.run.User, args, "systemctl --user start "+UpgradeUnit); err != nil {
+	run, joined, err := s.followUpgrade()
+	if err != nil {
 		return "", err
 	}
-	return "Upgrade started — follow its progress in odio-ui.", nil
+	if joined {
+		return "Upgrade already running.", nil
+	}
+	if run.proc.WaitFor(upgradeStartGrace) && run.proc.ExitCode() != 0 {
+		return "", &UserError{
+			Msg:   fmt.Sprintf("upgrade failed to start (exit %d)", run.proc.ExitCode()),
+			Modal: run.result(),
+		}
+	}
+	return "Upgrade started.", nil
+}
+
+// followUpgrade spawns `systemctl --user start` without --no-block: it
+// returns only when the oneshot is over, with its result, and on a unit
+// already activating (odio-api started it) it waits on that same job. The
+// unit runs in its own cgroup, so what this process follows is systemctl.
+// joined is true when a follower was already alive.
+func (s *Services) followUpgrade() (run *actionRun, joined bool, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.upgrade != nil && s.upgrade.alive() {
+		return s.upgrade, true, nil
+	}
+	argv := []string{"systemctl", "--user", "start", UpgradeUnit}
+	proc, err := s.run.Spawn(argv)
+	if err != nil {
+		return nil, false, userErrorf("cannot run %s: %v", strings.Join(argv, " "), err)
+	}
+	run = trackRun(proc, argv, "Upgrade", "", "")
+	s.upgrade = run
+	s.upgradeNote = actionNote{}
+	s.log.Printf("upgrade: spawned pid %d: %s", proc.Pid(), strings.Join(argv, " "))
+	go func() {
+		code := proc.ExitCode()
+		s.log.Printf("upgrade: pid %d exited %d after %s", proc.Pid(), code, run.elapsed())
+		s.mu.Lock()
+		s.upgradeNote = run.note()
+		s.mu.Unlock()
+		s.changed()
+	}()
+	return run, false, nil
+}
+
+// UpgradeState is (running, note of the last run). Without a follower of its
+// own, and only while the report says there is something to apply, it asks
+// systemd: a unit activating was started by odio-api or before this process,
+// and gets followed from here. The wait between show and start can land on
+// an inactive unit and start it again, which `apply` then refuses: the
+// playbook's last step re-ran `check`, so nothing is available any more.
+func (s *Services) UpgradeState(report *upgrade.Report) (running bool, note actionNote) {
+	s.mu.Lock()
+	run, note := s.upgrade, s.upgradeNote
+	s.mu.Unlock()
+	if run != nil && run.alive() {
+		return true, actionNote{}
+	}
+	if report == nil || !report.UpgradeAvailable {
+		return false, note
+	}
+	res, err := s.run.User([]string{"systemctl", "--user", "show", "-p", "ActiveState", "--value", UpgradeUnit})
+	if err != nil || strings.TrimSpace(res.Stdout) != "activating" {
+		return false, note
+	}
+	s.log.Printf("upgrade: %s is activating, following it", UpgradeUnit)
+	if _, _, err := s.followUpgrade(); err != nil {
+		s.log.Printf("upgrade: %v", err)
+		return true, note
+	}
+	return true, actionNote{}
 }
 
 // SetDAC escalates through `sudo -n odioctl dac set <id>`.

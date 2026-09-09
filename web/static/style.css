@@ -121,6 +121,8 @@ section h2 {
   color: var(--zinc-400);
 }
 .hint:last-child { margin-bottom: 0; }
+.hint.outcome { margin-top: 14px; color: var(--zinc-300); }
+.hint.outcome.err { color: var(--red); }
 .hint b { font-weight: 600; color: var(--zinc-300); }
 
 /* Banners (odio-ui toasts, but inline since the page re-renders) */
@@ -253,6 +255,8 @@ button.primary, a.btn.primary { background: var(--lime); color: #0d1410; font-we
 button.primary:hover, a.btn.primary:hover { background: #6ccb2c; }
 a.btn { display: inline-block; text-decoration: none; }
 button.small { padding: 5px 10px; font-size: 13px; }
+/* The upgrade in progress: a button that says so and does nothing. */
+button:disabled { opacity: 0.6; cursor: default; pointer-events: none; }
 select { flex: 1 1 240px; min-width: 0; max-width: 100%; }
 form.row button { flex-shrink: 0; }
 select:focus, button:focus-visible, a.btn:focus-visible { outline: 2px solid rgba(90, 184, 30, 0.5); outline-offset: 1px; }

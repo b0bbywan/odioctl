@@ -34,8 +34,13 @@ since rewritten in Go.
 - Privilege model: `odioctl web` runs as the odios target user (systemd --user)
   and edits state.json directly; only `config.txt` writes escalate through
   `sudo -n odioctl dac set <id>` / `dac unset`. Upgrades are never run by the
-  web process: "Apply now" does `systemctl --user start odio-upgrade.service`
-  (the unit odio-api drives too), so odio-ui shows the progress.
+  web process: "Apply now" spawns `systemctl --user start odio-upgrade.service`
+  (the unit odio-api drives too) *without* `--no-block` and follows that
+  systemctl to its end — the unit lives in its own cgroup, the web only
+  learns the result (`Services.followUpgrade`). A unit found `activating` at
+  render time (odio-api started it, or the web restarted) is joined the same
+  way: `start` on an activating unit waits on the job. No output is read:
+  the playbook's last step re-runs `check`, so upgrades.json settles by itself.
 - **Two groups, on purpose.** `odio` is odios' state group (read/write on
   `/var/lib/odio`), and odios puts the installing user in it too. `odioctl` is
   the one the sudoers fragment grants root to, created empty by the postinst

@@ -138,6 +138,9 @@ func (f *fixture) stopRuns() {
 	for _, run := range f.svc.runs {
 		run.proc.Stop()
 	}
+	if f.svc.upgrade != nil {
+		f.svc.upgrade.proc.Stop()
+	}
 }
 
 func (f *fixture) writeRoles(roles map[string]string) {
@@ -525,16 +528,103 @@ func TestUpgradeSection(t *testing.T) {
 	}
 }
 
-func TestApplyNowStartsTheUserUnit(t *testing.T) {
-	f := newFixture(t)
-	// make an upgrade pending: enable qbzd (opt-in, shipped by the manifest)
+// makeUpgradePending enables qbzd (opt-in, shipped by the manifest).
+func (f *fixture) makeUpgradePending() {
 	f.post("/components", url.Values{"kind": {"role"}, "name": {"qbzd"}, "enabled": {"1"}}, true)
+}
+
+func (f *fixture) waitUpgradeGone() bool {
+	f.svc.mu.Lock()
+	run := f.svc.upgrade
+	f.svc.mu.Unlock()
+	return run == nil || run.proc.WaitFor(2*time.Second)
+}
+
+func TestApplyNowStartsAndFollowsTheUserUnit(t *testing.T) {
+	f := newFixture(t)
+	f.makeUpgradePending()
+	f.script = "sleep 30" // the unit runs for a while
 	_, body := f.post("/upgrade", url.Values{}, true)
-	wants(t, body, "Upgrade started")
-	if len(f.userCalls) != 1 || !strings.Contains(strings.Join(f.userCalls[0], " "),
-		"systemctl --user start --no-block odio-upgrade.service") {
-		t.Errorf("userCalls = %v", f.userCalls)
+	wants(t, body, "Upgrade started.", "Upgrading…", `<button class="primary" type="button" disabled>`,
+		`<script src="/static/app.js`)
+	if len(f.spawns) != 1 || strings.Join(f.spawns[0], " ") != "systemctl --user start odio-upgrade.service" {
+		t.Errorf("spawns = %v", f.spawns)
 	}
+	for _, call := range f.userCalls {
+		if strings.Contains(strings.Join(call, " "), "start") {
+			t.Errorf("started through the User runner too: %v", call)
+		}
+	}
+	// a second click joins the run rather than starting it again
+	_, body = f.post("/upgrade", url.Values{}, true)
+	wants(t, body, "Upgrade already running.")
+	if len(f.spawns) != 1 {
+		t.Errorf("spawns = %v", f.spawns)
+	}
+	wants(t, f.logs.String(), "upgrade: spawned pid ")
+}
+
+func TestUpgradeEndShowsInTheCardAndOnEvents(t *testing.T) {
+	f := newFixture(t)
+	f.makeUpgradePending()
+	f.script = "sleep 0.5; exit 0"
+	old := upgradeStartGrace
+	upgradeStartGrace = 50 * time.Millisecond
+	t.Cleanup(func() { upgradeStartGrace = old })
+	_, body := f.post("/upgrade", url.Values{}, true)
+	wants(t, body, "Upgrade started.")
+	resp, err := http.Get(f.srv.URL + "/events")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	stream, _ := io.ReadAll(resp.Body)
+	wants(t, string(stream), "event: change\ndata: action\n\n")
+	if !f.waitUpgradeGone() {
+		t.Fatal("follower still alive")
+	}
+	_, body = f.get("/")
+	wants(t, body, `<p class="hint outcome">Upgrade: Done.</p>`, "Apply now")
+	if strings.Contains(body, "app.js") || strings.Contains(body, "Upgrading…") {
+		t.Error("page still shows the run after its end")
+	}
+}
+
+func TestUpgradeRefusedAtStartIsTheError(t *testing.T) {
+	f := newFixture(t)
+	f.makeUpgradePending()
+	f.script = "echo 'Failed to start odio-upgrade.service: Unit not found.'; exit 5"
+	_, body := f.post("/upgrade", url.Values{}, true)
+	wants(t, body, "upgrade failed to start (exit 5)", "Unit not found", "Apply now")
+	if strings.Contains(body, "Upgrade started") {
+		t.Error("refusal reported as a start")
+	}
+	_, body = f.get("/")
+	wants(t, body, `<p class="hint outcome err">Upgrade: Failed (exit 5). Failed to start`)
+}
+
+func TestUpgradeStartedElsewhereIsFollowed(t *testing.T) {
+	f := newFixture(t)
+	f.makeUpgradePending()
+	f.script = "sleep 30"
+	// odio-api started the unit: systemd says so, nothing of ours is alive
+	f.svc.run.User = func(args []string) (RunResult, error) {
+		f.userCalls = append(f.userCalls, args)
+		if strings.Contains(strings.Join(args, " "), "show -p ActiveState") {
+			return RunResult{Stdout: "activating\n"}, nil
+		}
+		return RunResult{}, nil
+	}
+	_, body := f.get("/")
+	wants(t, body, "Upgrading…", `<script src="/static/app.js`)
+	if len(f.spawns) != 1 || strings.Join(f.spawns[0], " ") != "systemctl --user start odio-upgrade.service" {
+		t.Errorf("spawns = %v", f.spawns)
+	}
+	f.get("/") // still followed, not spawned again
+	if len(f.spawns) != 1 {
+		t.Errorf("spawns = %v", f.spawns)
+	}
+	wants(t, f.logs.String(), "odio-upgrade.service is activating, following it")
 }
 
 func TestApplyWithNothingPendingIsRefused(t *testing.T) {
