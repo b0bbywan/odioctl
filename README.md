@@ -29,7 +29,7 @@
 node — upgrades, components and DAC selection today, and meant to grow with
 the rest of the node's settings. It started as a rewrite of the `odio-upgrade`
 script that used to ship inside [odios](https://github.com/b0bbywan/odios).
-A single static Go binary, **stdlib only**, packaged as per-arch `.deb`s on
+A single static Go binary (stdlib plus fsnotify), packaged as per-arch `.deb`s on
 [apt.odio.love](https://apt.odio.love).
 
 ## Install

@@ -6,10 +6,12 @@ since rewritten in Go.
 
 ## Rules of the house
 
-- **Go, stdlib only.** `go.mod` has no requires and stays that way; the
-  package ships as per-arch `.deb`s on apt.odio.love for a Raspberry Pi
-  appliance (armhf is GOARM=6 so one binary runs from the Zero up).
-  Subprocesses (`curl | bash`, `sudo -n`, `systemctl --user`) stay exec'd.
+- **Go, stdlib plus fsnotify.** `go.mod` requires `github.com/fsnotify/fsnotify`
+  (the units-directory watch below, the same one odio-api uses) and nothing
+  else; a new dependency is a decision, not a convenience. The package ships
+  as per-arch `.deb`s on apt.odio.love for a Raspberry Pi appliance (armhf is
+  GOARM=6 so one binary runs from the Zero up). Subprocesses (`curl | bash`,
+  `sudo -n`, `systemctl --user`) stay exec'd.
 - **No legacy support.** state.json must be the current schema (`state.State`,
   every field required — `state.Parse` refuses the rest as `*SchemaError`), no
   backfill of rc1–rc3 shapes, no dpkg reconstruction, no `odio-upgrade` compat
@@ -38,10 +40,16 @@ since rewritten in Go.
   odio-upgrade.service` (the unit odio-api drives too) and that token-checked
   POST is the only place the unit is ever started — a render observes. What
   the card shows comes from systemd, not from a held child: a watcher
-  (`Services.watchUpgrade`) polls `systemctl show` until the oneshot is no
-  longer `activating` and keeps `Result`/`ExecMainStatus` as the note. A unit
-  found `activating` at render time (odio-api started it, or the web
-  restarted under it) gets a watcher; one found `failed` is shown as such.
+  (`Services.watchUpgrade`) waits on `$XDG_RUNTIME_DIR/systemd/units`
+  (fsnotify, `Config.RuntimeDir`) for the `invocation:odio-upgrade.service`
+  link systemd removes as the oneshot leaves `activating`, then reads
+  `systemctl show` once — by key: `show` prints properties in systemd's
+  order, never the `-p` one — and keeps `Result`/`ExecMainStatus` as the
+  note. No probe right after `start --no-block`: it returns before the unit
+  is activating. A slow tick backs the events; without the directory the
+  unit is polled. A unit found `activating` at render time (odio-api started
+  it, or the web restarted under it) gets a watcher; one found `failed` is
+  shown as such.
   The playbook's last step re-runs `check`, so upgrades.json settles by itself.
 - **Two groups, on purpose.** `odio` is odios' state group (read/write on
   `/var/lib/odio`), and odios puts the installing user in it too. `odioctl` is

@@ -5,6 +5,7 @@ package web
 
 import (
 	"os"
+	"path/filepath"
 
 	"github.com/b0bbywan/odioctl/state"
 )
@@ -26,6 +27,7 @@ type Config struct {
 	OdioctlBin   string
 	UpgradesPath string // "" → sibling of a custom StatePath, else /var/cache
 	Home         string // the target user's home, what an action's {home} becomes
+	RuntimeDir   string // the user manager's $XDG_RUNTIME_DIR, where it exposes its units
 }
 
 func DefaultConfig() Config {
@@ -43,7 +45,14 @@ func DefaultConfig() Config {
 		StatePath:  state.SystemStatePath,
 		OdioctlBin: bin,
 		Home:       home,
+		RuntimeDir: os.Getenv("XDG_RUNTIME_DIR"),
 	}
+}
+
+// UnitsDir is where the user manager keeps an invocation:<unit> symlink for
+// as long as a unit runs (odio-api follows the same links).
+func (c Config) UnitsDir() string {
+	return filepath.Join(c.RuntimeDir, "systemd", "units")
 }
 
 func (c Config) ResolvedUpgradesPath() string {

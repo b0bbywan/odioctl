@@ -78,7 +78,11 @@ func newFixture(t *testing.T) *fixture {
 	t.Cleanup(func() { manifest.Fetch = oldFetch })
 
 	f.script = "echo 'paste this URL:'; echo '  https://qobuz.test/oauth?id=1'; sleep 30"
-	cfg := Config{StatePath: f.statePath, ConfigTxt: f.configPath, Home: f.dir}
+	// the user manager's runtime dir, where a fakeUnit leaves its invocation link
+	if err := os.MkdirAll(filepath.Join(f.dir, "run", "systemd", "units"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Config{StatePath: f.statePath, ConfigTxt: f.configPath, Home: f.dir, RuntimeDir: filepath.Join(f.dir, "run")}
 	f.svc = NewServices(cfg, Runners{
 		// Stand-in for `sudo -n odioctl dac …`: the same code path, in-process.
 		Privileged: func(args []string) (RunResult, error) {
@@ -534,25 +538,47 @@ func (f *fixture) makeUpgradePending() {
 
 // fakeUnit stands in for systemd's view of odio-upgrade.service: `show`
 // answers from it in systemd's order (Result and ExecMainStatus before
-// ActiveState, as on a box), `start` flips it to activating. Guarded: the
-// watcher polls from its own goroutine.
+// ActiveState, as on a box), `start` flips it to activating. Its invocation
+// link under the units directory lives while it is activating, as
+// systemd's does. Guarded: the watcher polls from its own goroutine.
 type fakeUnit struct {
 	mu     sync.Mutex
 	active string // activating, inactive, failed
 	result string
 	code   int
+	link   string
 }
 
 func (u *fakeUnit) set(active, result string, code int) {
 	u.mu.Lock()
 	defer u.mu.Unlock()
 	u.active, u.result, u.code = active, result, code
+	u.exportLink()
+}
+
+// exportLink is systemd's invocation link: there while activating, gone
+// after — removed once the state is, so a `show` on the event sees the end.
+func (u *fakeUnit) exportLink() {
+	if u.link == "" {
+		return
+	}
+	if u.active == "activating" {
+		_ = os.Symlink("0123456789abcdef", u.link)
+	} else {
+		_ = os.Remove(u.link)
+	}
 }
 
 // useUnit answers the User runner from u; the watcher polls from its own
-// goroutine, so the calls it records are read back under u's lock.
+// goroutine, so the calls it records are read back under u's lock. The
+// tick behind inotify is pushed far off: only the link's removal may end
+// the watcher within waitWatcherGone's patience.
 func (f *fixture) useUnit(u *fakeUnit) {
 	f.unit = u
+	u.mu.Lock()
+	u.link = filepath.Join(f.svc.cfg.UnitsDir(), "invocation:"+UpgradeUnit)
+	u.exportLink()
+	u.mu.Unlock()
 	f.svc.run.User = func(args []string) (RunResult, error) {
 		u.mu.Lock()
 		defer u.mu.Unlock()
@@ -563,12 +589,13 @@ func (f *fixture) useUnit(u *fakeUnit) {
 			return RunResult{Stdout: fmt.Sprintf("Result=%s\nExecMainStatus=%d\nActiveState=%s\n", u.result, u.code, u.active)}, nil
 		case strings.Contains(cmd, "start"):
 			u.active = "activating"
+			u.exportLink()
 		}
 		return RunResult{}, nil
 	}
-	old := upgradePoll
-	upgradePoll = 20 * time.Millisecond
-	f.t.Cleanup(func() { upgradePoll = old })
+	oldPoll, oldRecheck := upgradePoll, upgradeRecheck
+	upgradePoll, upgradeRecheck = 20*time.Millisecond, time.Hour
+	f.t.Cleanup(func() { upgradePoll, upgradeRecheck = oldPoll, oldRecheck })
 }
 
 // starts is every `systemctl … start` the User runner saw, one string each.
@@ -667,6 +694,22 @@ func TestUpgradeStartedElsewhereIsWatchedNeverStarted(t *testing.T) {
 	}
 	_, body = f.get("/")
 	wants(t, body, "Upgrade: Failed (exit-code, exit 2).")
+}
+
+func TestWithoutUnitsDirTheUnitIsPolled(t *testing.T) {
+	f := newFixture(t)
+	f.makeUpgradePending()
+	f.svc.cfg.RuntimeDir = filepath.Join(f.dir, "nowhere")
+	unit := &fakeUnit{active: "inactive", result: "success"}
+	f.useUnit(unit)
+	f.post("/upgrade", url.Values{}, true)
+	unit.set("failed", "exit-code", 1)
+	if !f.waitWatcherGone() {
+		t.Fatal("watcher still running")
+	}
+	wants(t, f.logs.String(), "cannot watch", "polling odio-upgrade.service", "odio-upgrade.service failed after")
+	_, body := f.get("/")
+	wants(t, body, "Upgrade: Failed (exit-code, exit 1).")
 }
 
 func TestUnitFailedBeforeThisProcessIsShown(t *testing.T) {
