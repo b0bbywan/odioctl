@@ -138,7 +138,7 @@ func (r *actionRun) result() *ActionResult {
 	if r.alive() {
 		res.URL = r.link()
 	} else {
-		res.Done = r.proc.ExitCode() == 0
+		res.Note = r.note()
 	}
 	return res
 }
@@ -149,6 +149,9 @@ type actionNote struct {
 	Text   string
 	Failed bool
 }
+
+// OK is a run that ended well — the templates' predicate for a Done badge.
+func (n actionNote) OK() bool { return n.Text != "" && !n.Failed }
 
 // settle waits for the link or EOF before the output is read: the exit is
 // reaped before the drain has the last line. Bounded, a grandchild could

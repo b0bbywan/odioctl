@@ -54,9 +54,8 @@ type bannerView struct{ Kind, Text string }
 
 type actionView struct {
 	ID, Button               string
-	URL, LinkLabel, LinkNote string // pending link, when URL is set
-	Done                     bool   // the last run succeeded: a badge where the link was
-	Note                     string // …or how it failed, painted red
+	URL, LinkLabel, LinkNote string     // pending link, when URL is set
+	Note                     actionNote // how the last run ended: a badge, or the failure in red
 }
 
 type rowView struct {
@@ -96,9 +95,8 @@ type dacView struct {
 type upgradeView struct {
 	Checked   bool // a check has run (upgrades.json exists)
 	Available bool
-	Running   bool   // odio-upgrade.service is being followed: no Apply button
-	Note      string // how the last run ended, "" when none this process saw
-	Failed    bool
+	Running   bool       // odio-upgrade.service is being followed: no Apply button
+	Note      actionNote // how the last run ended, empty when none was seen
 	UpToDate  string
 	Token     string
 	Items     []string
@@ -152,18 +150,13 @@ func rowViewOf(svc *Services, c components.Component, child bool) rowView {
 		return row
 	}
 	for _, a := range c.Actions {
-		av := actionView{ID: a.ID, Button: a.Label}
 		url, note := svc.ActionState(c.Kind, c.Name, a.ID)
-		switch {
-		case url != "":
+		av := actionView{ID: a.ID, Button: a.Label, Note: note}
+		if url != "" {
 			av.URL, av.LinkLabel, av.LinkNote = url, a.LinkLabel, a.LinkNote
 			if av.LinkNote == "" {
 				av.LinkNote = "started"
 			}
-		case note.Failed:
-			av.Note = a.Label + ": " + note.Text
-		case note.Text != "":
-			av.Done = true
 		}
 		row.Actions = append(row.Actions, av)
 	}
@@ -263,13 +256,7 @@ func dacViewOf(svc *Services, d dac.Status) dacView {
 
 func upgradeViewOf(svc *Services, report *upgrade.Report) upgradeView {
 	running, note := svc.UpgradeState(report)
-	view := upgradeView{
-		Running: running,
-		Failed:  note.Failed,
-	}
-	if note.Text != "" {
-		view.Note = "Upgrade: " + note.Text
-	}
+	view := upgradeView{Running: running, Note: note}
 	if report == nil {
 		return view
 	}

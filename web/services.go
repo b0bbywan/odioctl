@@ -82,7 +82,7 @@ type Runners struct {
 type ActionResult struct {
 	ID                            string // element id, so a later fragment replaces this modal
 	Title, Output, URL, LinkLabel string
-	Done                          bool // exited 0: a Done button where the link was
+	Note                          actionNote // how it ended, once it has: a Done button where the link was
 }
 
 type actionKey struct {
