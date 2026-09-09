@@ -6,4 +6,4 @@
 <p class="hint">Runs <code>odioctl upgrade apply</code> as root through <code>odio-upgrade.service</code>; the box keeps playing but services restart along the way.</p>
 <ul class="pending">{{range .Items}}<li>{{.}}</li>{{end}}</ul>
 <form method="post" action="/upgrade"><input type="hidden" name="token" value="{{.Token}}"><button class="primary" type="submit">Apply now</button></form>
-{{end}}{{if .Note}}<p class="hint outcome{{if .Failed}} err{{end}}">{{.Note}}</p>{{end}}</section>
+{{end}}{{if .Note.Text}}<p class="hint outcome{{if .Note.Failed}} err{{end}}">Upgrade: {{.Note.Text}}</p>{{end}}</section>
