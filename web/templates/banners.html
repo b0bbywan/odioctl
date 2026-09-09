@@ -1,2 +1,2 @@
-<div id="banners">{{range .}}{{template "banner.html" .}}
+<div id="banners" sse-swap="banners" hx-swap="outerHTML">{{range .}}{{template "banner.html" .}}
 {{end}}</div>

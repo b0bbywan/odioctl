@@ -3,9 +3,10 @@ package web
 // The page: view models built from Services, markup in templates/*.html —
 // composition ({{range}}, {{if}}, {{template}}) lives in the templates,
 // escaping in html/template. The stylesheet and logo in static/ mirror
-// odio-ui's look (go-odio-api). The modal is passed in by the POST that
-// produced it, so an action's output goes to that one response and the next
-// page load is clean.
+// odio-ui's look (go-odio-api), htmx and its SSE extension are odio-api's
+// copies. Each section subscribes to its own /events event and swaps
+// itself; a POST answers the notice (and the modal of an action), the
+// state follows on the stream.
 
 import (
 	"embed"
@@ -24,15 +25,16 @@ import (
 //go:embed templates/*.html
 var templatesFS embed.FS
 
-//go:embed static/style.css static/logo.png static/app.js
+//go:embed static/style.css static/logo.png static/htmx.min.js static/htmx-sse.js
 var staticFS embed.FS
 
 var templates = template.Must(template.ParseFS(templatesFS, "templates/*.html"))
 
 var staticTypes = map[string]string{
-	"style.css": "text/css; charset=utf-8",
-	"logo.png":  "image/png",
-	"app.js":    "text/javascript; charset=utf-8",
+	"style.css":   "text/css; charset=utf-8",
+	"logo.png":    "image/png",
+	"htmx.min.js": "text/javascript; charset=utf-8",
+	"htmx-sse.js": "text/javascript; charset=utf-8",
 }
 
 // StaticAsset is the (content, media type) of a file under static/, or ok=false.
@@ -104,13 +106,19 @@ type upgradeView struct {
 
 type pageView struct {
 	Version, UIURL, Hostname string
-	Odios                    string // "" = no badge
-	Banners                  []bannerView
+	Odios                    string       // "" = no badge
+	Banners                  []bannerView // what holds across renders: the reboot warning
 	Upgrade                  upgradeView
 	Components               componentsView
 	Dac                      dacView
-	Modal                    *ActionResult
-	Live                     bool // something runs: load app.js, which swaps in what /events sends
+}
+
+// noticeView is the outcome of a POST: its banner, and the modal of an
+// action — the fragment for #notice, with the modal swapped out of band
+// into #modal.
+type noticeView struct {
+	Notices []bannerView
+	Modal   *ActionResult
 }
 
 // (chip text, button label) per component status; the button performs the
@@ -293,62 +301,72 @@ func modalView(res *ActionResult) *ActionResult {
 	return &m
 }
 
-// bannersOf is the page's banner strip: the POST's outcome or error, then
-// what holds across renders (the reboot warning).
-func bannersOf(p PageData, d dac.Status) []bannerView {
-	var out []bannerView
-	for _, b := range []bannerView{{"ok", p.Message}, {"err", p.Error}} {
+func noticeViewOf(msg, errText string, modal *ActionResult) noticeView {
+	view := noticeView{Modal: modalView(modal)}
+	for _, b := range []bannerView{{"ok", msg}, {"err", errText}} {
 		if b.Text != "" {
-			out = append(out, b)
+			view.Notices = append(view.Notices, b)
 		}
 	}
-	if d.RebootRequired {
-		out = append(out, bannerView{"warn", "A reboot is required to apply the DAC change."})
-	}
-	return out
+	return view
 }
 
-// RenderFragments is what app.js swaps in on a change: the banner strip
-// (without the POST's message — the card or row it announced now shows the
-// outcome), the upgrade card, the Components section (an upgrade installs
-// rows, not only the ones with actions), and the modal of each finished
-// action — each a root element carrying its id, from the same templates
-// as the page.
-func RenderFragments(svc *Services) ([]string, error) {
-	var out []string
-	add := func(name string, data any) error {
+func bannersOf(d dac.Status) []bannerView {
+	if d.RebootRequired {
+		return []bannerView{{"warn", "A reboot is required to apply the DAC change."}}
+	}
+	return nil
+}
+
+// RenderNotice is the answer to a POST: the banner for #notice and, out of
+// band, the modal of an action. The state follows on the stream.
+func RenderNotice(msg, errText string, modal *ActionResult) (string, error) {
+	var b strings.Builder
+	if err := templates.ExecuteTemplate(&b, "notice.html", noticeViewOf(msg, errText, modal)); err != nil {
+		return "", err
+	}
+	return b.String(), nil
+}
+
+// Section is one /events event: the element it carries swaps itself in,
+// listening to Event by name (sse-swap on its root).
+type Section struct {
+	Event, HTML string
+}
+
+// RenderSections is the whole state as the stream sends it on connect and
+// on every change: the modal of each finished action (only a page showing
+// it listens), the banners, the upgrade card, the Components section (an
+// upgrade installs rows) and the DAC one — from the page's own templates.
+func RenderSections(svc *Services) ([]Section, error) {
+	var out []Section
+	add := func(event, name string, data any) error {
 		var b strings.Builder
 		if err := templates.ExecuteTemplate(&b, name, data); err != nil {
 			return err
 		}
-		out = append(out, b.String())
+		out = append(out, Section{Event: event, HTML: b.String()})
 		return nil
 	}
-	if err := add("banners.html", bannersOf(PageData{}, svc.DacStatus())); err != nil {
-		return nil, err
-	}
-	if err := add("upgrade.html", upgradeViewOf(svc, svc.UpgradeReport())); err != nil {
-		return nil, err
-	}
-	st, stateErr := stateOf(svc)
-	if err := add("components.html", componentsViewOf(svc, st, stateErr)); err != nil {
-		return nil, err
-	}
 	for _, res := range svc.FinishedResults() {
-		if err := add("modal.html", modalView(res)); err != nil {
+		if err := add(res.ID, "modal.html", modalView(res)); err != nil {
 			return nil, err
 		}
 	}
+	if err := add("banners", "banners.html", bannersOf(svc.DacStatus())); err != nil {
+		return nil, err
+	}
+	if err := add("upgrade", "upgrade.html", upgradeViewOf(svc, svc.UpgradeReport())); err != nil {
+		return nil, err
+	}
+	st, stateErr := stateOf(svc)
+	if err := add("components", "components.html", componentsViewOf(svc, st, stateErr)); err != nil {
+		return nil, err
+	}
+	if err := add("dac", "dac.html", dacViewOf(svc, svc.DacStatus())); err != nil {
+		return nil, err
+	}
 	return out, nil
-}
-
-// PageData tunes one render of the page: the outcome banner or error of a
-// POST, its modal, and the Host header the browser used.
-type PageData struct {
-	Message string
-	Error   string
-	Result  *ActionResult
-	Host    string
 }
 
 // stateOf is state.json as the Components section takes it: the state, or
@@ -361,14 +379,16 @@ func stateOf(svc *Services) (*state.State, string) {
 	return &s, ""
 }
 
-func RenderPage(svc *Services, p PageData) (string, error) {
+// RenderPage is GET /: the sections as they stand, an empty #notice and
+// #modal for the POSTs to fill. host is the Host header the browser used.
+func RenderPage(svc *Services, host string) (string, error) {
 	st, stateErr := stateOf(svc)
 	d := svc.DacStatus()
 	// The Host header when the browser gave one (that name reaches the box),
 	// the box's own hostname otherwise — same address for the odio-ui link
 	// and ssh. The logo is that way home: this page is a settings annex of
 	// odio-ui.
-	hostname := p.Host
+	hostname := host
 	if hostname == "" {
 		hostname, _ = os.Hostname()
 	}
@@ -379,24 +399,13 @@ func RenderPage(svc *Services, p PageData) (string, error) {
 		Version:    config.AppVersion,
 		UIURL:      uiURL,
 		Hostname:   selfName,
+		Banners:    bannersOf(d),
 		Upgrade:    upgradeViewOf(svc, svc.UpgradeReport()),
 		Components: componentsViewOf(svc, st, stateErr),
 		Dac:        dacViewOf(svc, d),
 	}
-	view.Modal = modalView(p.Result)
 	if st != nil {
 		view.Odios = st.Odios
-	}
-	view.Banners = bannersOf(p, d)
-	// From the view itself, so the script and what it waits for cannot
-	// disagree: a run ending between the two would leave a stuck page.
-	view.Live = view.Upgrade.Running
-	for _, g := range view.Components.Groups {
-		for _, row := range g.Rows {
-			for _, a := range row.Actions {
-				view.Live = view.Live || a.URL != ""
-			}
-		}
 	}
 
 	var b strings.Builder

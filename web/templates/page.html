@@ -3,12 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="htmx-config" content='{"responseHandling":[{"code":".*","swap":true}]}'>
 <title>odio Settings</title>
-{{if .Live}}<script src="/static/app.js?v={{.Version}}" defer></script>{{end}}
 <link rel="icon" type="image/png" href="/static/logo.png">
 <link rel="stylesheet" href="/static/style.css?v={{.Version}}">
+<script src="/static/htmx.min.js?v={{.Version}}"></script>
+<script src="/static/htmx-sse.js?v={{.Version}}"></script>
 </head>
-<body>
+<body hx-ext="sse" sse-connect="/events">
 <header>
   <div class="wrap">
     <div class="brand">
@@ -18,6 +20,7 @@
         <p>{{.Hostname}}</p>
       </div>
     </div>
+    <div id="notice"></div>
     <div class="links">
       {{if .Odios}}<span class="badge">odio {{.Odios}}</span>{{end}}
     </div>
@@ -29,7 +32,7 @@
 {{template "components.html" .Components}}
 {{template "dac.html" .Dac}}
 </main>
-{{if .Modal}}{{template "modal.html" .Modal}}{{end}}
+<div id="modal"></div>
 <footer>
   <div class="wrap">
     <div>odioctl {{.Version}}</div>

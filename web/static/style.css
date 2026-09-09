@@ -125,7 +125,8 @@ section h2 {
 .hint.outcome.err { color: var(--red); }
 .hint b { font-weight: 600; color: var(--zinc-300); }
 
-/* Banners (odio-ui toasts, but inline since the page re-renders) */
+/* Banners (odio-ui toasts, but inline). #notice is a POST's outcome: a
+   success fades once read, the state below says the same; an error stays. */
 .banner {
   padding: 10px 14px;
   border-radius: 10px;
@@ -147,6 +148,28 @@ section h2 {
   background: rgba(200, 150, 58, 0.15);
   color: var(--gold);
   border-color: rgba(200, 150, 58, 0.3);
+}
+/* #notice sits in the sticky header (odio-ui's toast slot): in view at any
+   scroll, since nothing re-renders the page. */
+#notice {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+#notice .banner {
+  margin: 0;
+  padding: 6px 12px;
+  font-size: 13px;
+  max-width: 100%;
+}
+#notice .banner.ok {
+  animation: notice-out 0.4s ease 6s forwards;
+}
+@keyframes notice-out {
+  from { opacity: 1; }
+  to { opacity: 0; visibility: hidden; }
 }
 
 /* Component rows (odio-ui .service-card) */
