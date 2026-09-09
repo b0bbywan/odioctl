@@ -361,14 +361,15 @@ func TestEventsStreamSendsFragmentsUntilTheActionExits(t *testing.T) {
 	}
 	body, _ := io.ReadAll(resp.Body) // the stream ends with the run
 	wants(t, string(body),
-		"event: fragment\ndata: <div id=\"row-role-qbzd\" class=\"card\">",
+		"event: fragment\ndata: <section id=\"components\">",
+		`<div id="row-role-qbzd" class="card">`,
 		`<span class="chip installed">Done</span>`,
 		"event: fragment\ndata: <div id=\"modal-role-qbzd-login\" class=\"scrim\">",
 		`<button class="primary" type="button" disabled>Done</button>`,
 		"event: fragment\ndata: <section id=\"upgrade\">",
 		"event: end\ndata: -\n\n")
 	// the first batch, sent on connect, still had the link; the last has not
-	last := string(body)[strings.LastIndex(string(body), "event: fragment\ndata: <div id=\"row-role-qbzd\""):]
+	last := string(body)[strings.LastIndex(string(body), "event: fragment\ndata: <section id=\"components\">"):]
 	if strings.Contains(last, `href="https://qobuz.test`) {
 		t.Error("the link survived the end of the run")
 	}
@@ -653,12 +654,14 @@ func TestApplyNowStartsAndWatchesTheUserUnit(t *testing.T) {
 	if len(f.starts()) != 1 || len(f.spawns) != 0 {
 		t.Errorf("starts = %v, spawns = %v", f.starts(), f.spawns)
 	}
-	// the unit ends: the watcher notes it, the stream says so, the card shows it
+	// the unit ends having installed qbzd: the watcher notes it, the stream
+	// says so, the card and the row show it
 	resp, err := http.Get(f.srv.URL + "/events")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
+	f.installQbzd()
 	unit.set("inactive", "success", 0)
 	stream, _ := io.ReadAll(resp.Body)
 	wants(t, string(stream), "event: fragment\ndata: <div id=\"banners\"></div>",
@@ -666,6 +669,10 @@ func TestApplyNowStartsAndWatchesTheUserUnit(t *testing.T) {
 		"Upgrade: Done.", "Apply now", "event: end\n")
 	if strings.Contains(string(stream), "Upgrade started.") {
 		t.Error("the POST's banner outlives the run")
+	}
+	last := string(stream)[strings.LastIndex(string(stream), "event: fragment\ndata: <section id=\"components\">"):]
+	if !strings.Contains(last, `<div id="row-role-qbzd" class="card">`) || !strings.Contains(last, ">Installed<") {
+		t.Error("the row installed by the run was not swapped in")
 	}
 	if !f.waitWatcherGone() {
 		t.Fatal("watcher still running")

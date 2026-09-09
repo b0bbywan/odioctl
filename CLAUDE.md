@@ -90,7 +90,8 @@ since rewritten in Go.
   listens to `GET /events` (SSE) and swaps in the *fragments* the server
   sends on a change — the banner strip (minus the POST's own message: the
   card or row it announced now shows the outcome), the upgrade card, the
-  rows with actions, the modal of a finished action, each rendered by the
+  whole Components section (an upgrade installs rows, not only the ones
+  with actions), the modal of a finished action, each rendered by the
   page's own templates (`web.RenderFragments`) and replaced by the `id` on
   its root element — until `end` says nothing runs. It never builds markup and never POSTs;
   forms stay the way to act. Markup lives in `web/templates/*.html` (`html/template`:

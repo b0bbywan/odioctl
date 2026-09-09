@@ -310,9 +310,10 @@ func bannersOf(p PageData, d dac.Status) []bannerView {
 
 // RenderFragments is what app.js swaps in on a change: the banner strip
 // (without the POST's message — the card or row it announced now shows the
-// outcome), the upgrade card, every row with actions, and the modal of each
-// finished action — each a root element carrying its id, from the same
-// templates as the page.
+// outcome), the upgrade card, the Components section (an upgrade installs
+// rows, not only the ones with actions), and the modal of each finished
+// action — each a root element carrying its id, from the same templates
+// as the page.
 func RenderFragments(svc *Services) ([]string, error) {
 	var out []string
 	add := func(name string, data any) error {
@@ -329,17 +330,9 @@ func RenderFragments(svc *Services) ([]string, error) {
 	if err := add("upgrade.html", upgradeViewOf(svc, svc.UpgradeReport())); err != nil {
 		return nil, err
 	}
-	if st, err := svc.ReadState(); err == nil {
-		for _, g := range componentsViewOf(svc, &st, "").Groups {
-			for _, row := range g.Rows {
-				if len(row.Actions) == 0 {
-					continue
-				}
-				if err := add("component_row.html", row); err != nil {
-					return nil, err
-				}
-			}
-		}
+	st, stateErr := stateOf(svc)
+	if err := add("components.html", componentsViewOf(svc, st, stateErr)); err != nil {
+		return nil, err
 	}
 	for _, res := range svc.FinishedResults() {
 		if err := add("modal.html", modalView(res)); err != nil {
@@ -358,14 +351,18 @@ type PageData struct {
 	Host    string
 }
 
-func RenderPage(svc *Services, p PageData) (string, error) {
-	var st *state.State
-	stateErr := ""
-	if s, err := svc.ReadState(); err == nil {
-		st = &s
-	} else {
-		stateErr = stateErrorMsg(svc.Config().StatePath, err)
+// stateOf is state.json as the Components section takes it: the state, or
+// nil and the message to show instead.
+func stateOf(svc *Services) (*state.State, string) {
+	s, err := svc.ReadState()
+	if err != nil {
+		return nil, stateErrorMsg(svc.Config().StatePath, err)
 	}
+	return &s, ""
+}
+
+func RenderPage(svc *Services, p PageData) (string, error) {
+	st, stateErr := stateOf(svc)
 	d := svc.DacStatus()
 	// The Host header when the browser gave one (that name reaches the box),
 	// the box's own hostname otherwise — same address for the odio-ui link
