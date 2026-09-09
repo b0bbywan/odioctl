@@ -661,8 +661,12 @@ func TestApplyNowStartsAndWatchesTheUserUnit(t *testing.T) {
 	defer resp.Body.Close()
 	unit.set("inactive", "success", 0)
 	stream, _ := io.ReadAll(resp.Body)
-	wants(t, string(stream), "event: fragment\ndata: <section id=\"upgrade\">",
+	wants(t, string(stream), "event: fragment\ndata: <div id=\"banners\"></div>",
+		"event: fragment\ndata: <section id=\"upgrade\">",
 		"Upgrade: Done.", "Apply now", "event: end\n")
+	if strings.Contains(string(stream), "Upgrade started.") {
+		t.Error("the POST's banner outlives the run")
+	}
 	if !f.waitWatcherGone() {
 		t.Fatal("watcher still running")
 	}
