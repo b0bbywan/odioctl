@@ -1,4 +1,4 @@
-<div id="{{.ID}}" class="scrim">
+<div id="{{.ID}}" class="scrim" sse-swap="{{.ID}}" hx-swap="outerHTML">
   <div class="modal" role="dialog" aria-modal="true" aria-label="{{.Title}}">
     <h2>{{.Title}}</h2>
     <pre>{{.Output}}</pre>

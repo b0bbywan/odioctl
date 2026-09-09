@@ -1,6 +1,7 @@
 package web
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"net/http"
@@ -170,7 +171,8 @@ func (f *fixture) get(path string) (int, string) {
 	return resp.StatusCode, string(body)
 }
 
-// post submits a form; the response re-renders the page with a banner.
+// post submits a form as htmx does: the answer is the notice (and an
+// action's modal), the state follows on the stream.
 func (f *fixture) post(path string, form url.Values, withToken bool) (int, string) {
 	f.t.Helper()
 	if withToken && form.Get("token") == "" {
@@ -193,6 +195,66 @@ func (f *fixture) state() state.State {
 		f.t.Fatal(err)
 	}
 	return st
+}
+
+// stream is an open /events connection, read line by line from its own
+// goroutine so a test can wait for a batch without a body that never ends.
+type stream struct {
+	t     *testing.T
+	lines chan string
+	read  strings.Builder
+}
+
+func (f *fixture) openStream() *stream {
+	f.t.Helper()
+	resp, err := http.Get(f.srv.URL + "/events")
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	if ct := resp.Header.Get("Content-Type"); ct != "text/event-stream" {
+		f.t.Errorf("Content-Type = %q", ct)
+	}
+	s := &stream{t: f.t, lines: make(chan string, 1024)}
+	go func() {
+		sc := bufio.NewScanner(resp.Body)
+		sc.Buffer(make([]byte, 1<<20), 1<<20)
+		for sc.Scan() {
+			s.lines <- sc.Text()
+		}
+		close(s.lines)
+	}()
+	f.t.Cleanup(func() { resp.Body.Close() })
+	return s
+}
+
+// batch reads until the batch carrying marker is over — the dac section
+// closes every batch — and returns everything read so far; fatal after 2s.
+func (s *stream) batch(marker string) string {
+	s.t.Helper()
+	seen, inDac := false, false
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case line, ok := <-s.lines:
+			if !ok {
+				s.t.Fatalf("stream closed before %q; read:\n%s", marker, s.read.String())
+			}
+			s.read.WriteString(line + "\n")
+			if strings.Contains(line, marker) {
+				seen = true
+			}
+			if line == "event: dac" {
+				inDac = true
+			} else if line == "" && inDac {
+				if seen {
+					return s.read.String()
+				}
+				inDac = false
+			}
+		case <-deadline:
+			s.t.Fatalf("no %q on the stream within 2s; read:\n%s", marker, s.read.String())
+		}
+	}
 }
 
 func wants(t *testing.T, body string, subs ...string) {
@@ -231,6 +293,12 @@ func TestStaticAssets(t *testing.T) {
 	f := newFixture(t)
 	if code, body := f.get("/static/style.css"); code != 200 || !strings.Contains(body, "--zinc-900") {
 		t.Errorf("style.css: %d", code)
+	}
+	if code, body := f.get("/static/htmx.min.js"); code != 200 || !strings.Contains(body, "htmx") {
+		t.Errorf("htmx.min.js: %d", code)
+	}
+	if code, body := f.get("/static/htmx-sse.js"); code != 200 || !strings.Contains(body, "sse-swap") {
+		t.Errorf("htmx-sse.js: %d", code)
 	}
 	if code, _ := f.get("/static/nope.js"); code != 404 {
 		t.Errorf("nope.js: %d", code)
@@ -335,58 +403,81 @@ func TestActionLinkIsLiftedOffStdoutAndShown(t *testing.T) {
 		"kind": {"role"}, "name": {"qbzd"}, "action": {"login"},
 	}, true)
 	wants(t, body, "https://qobuz.test/oauth?id=1", "open the link below to finish",
-		"Open the Qobuz sign-in page", `<script src="/static/app.js`)
+		"Open the Qobuz sign-in page")
 	if len(f.spawns) != 1 || f.spawns[0][0] != "qbzd" {
 		t.Errorf("spawns = %v", f.spawns)
 	}
-	// the row keeps the link on the next page load, while the process lives,
-	// and the page keeps listening for its end
+	// the row keeps the link on the next page load, while the process lives
 	_, body = f.get("/")
-	wants(t, body, "https://qobuz.test/oauth?id=1", `<script src="/static/app.js`)
+	wants(t, body, "https://qobuz.test/oauth?id=1")
 }
 
-func TestEventsStreamSendsFragmentsUntilTheActionExits(t *testing.T) {
+func TestEventsStreamCarriesTheSectionsAsTheActionExits(t *testing.T) {
 	f := newFixture(t)
 	f.installQbzd()
 	f.script = "echo 'https://qobuz.test/oauth?id=1'; sleep 0.5"
 	f.post("/components/action", url.Values{"kind": {"role"}, "name": {"qbzd"}, "action": {"login"}}, true)
 
-	resp, err := http.Get(f.srv.URL + "/events")
-	if err != nil {
-		t.Fatal(err)
+	// on connect, the state now: the row with its link, every section named
+	s := f.openStream()
+	first := s.batch("event: dac")
+	wants(t, first,
+		"event: banners\ndata: <div id=\"banners\" sse-swap=\"banners\" hx-swap=\"outerHTML\">",
+		"event: upgrade\ndata: <section id=\"upgrade\" sse-swap=\"upgrade\" hx-swap=\"outerHTML\">",
+		"event: components\ndata: <section id=\"components\" sse-swap=\"components\" hx-swap=\"outerHTML\">",
+		`href="https://qobuz.test/oauth?id=1"`,
+		"event: dac\ndata: <section id=\"dac\" sse-swap=\"dac\" hx-swap=\"outerHTML\">")
+	if strings.Contains(first, "event: modal-") {
+		t.Error("a modal on the stream before its action ended")
 	}
-	defer resp.Body.Close()
-	if ct := resp.Header.Get("Content-Type"); ct != "text/event-stream" {
-		t.Errorf("Content-Type = %q", ct)
-	}
-	body, _ := io.ReadAll(resp.Body) // the stream ends with the run
-	wants(t, string(body),
-		"event: fragment\ndata: <section id=\"components\">",
-		`<div id="row-role-qbzd" class="card">`,
-		`<span class="chip installed">Done</span>`,
-		"event: fragment\ndata: <div id=\"modal-role-qbzd-login\" class=\"scrim\">",
-		`<button class="primary" type="button" disabled>Done</button>`,
-		"event: fragment\ndata: <section id=\"upgrade\">",
-		"event: end\ndata: -\n\n")
-	// the first batch, sent on connect, still had the link; the last has not
-	last := string(body)[strings.LastIndex(string(body), "event: fragment\ndata: <section id=\"components\">"):]
+	// the run ends: the row shows Done, and so does the modal, on its own
+	// event (only a page showing it listens)
+	all := s.batch(`disabled>Done</button>`)
+	wants(t, all,
+		"event: modal-role-qbzd-login\ndata: <div id=\"modal-role-qbzd-login\" class=\"scrim\" sse-swap=\"modal-role-qbzd-login\" hx-swap=\"outerHTML\">",
+		`<span class="chip installed">Done</span>`)
+	last := all[strings.LastIndex(all, "event: components\n"):]
 	if strings.Contains(last, `href="https://qobuz.test`) {
 		t.Error("the link survived the end of the run")
 	}
+	if strings.Contains(all, "event: end") {
+		t.Error("the stream is the page's: it does not end")
+	}
+}
 
-	// nothing running any more: the current state and end at once, no
-	// waiting for an event gone by
-	resp, err = http.Get(f.srv.URL + "/events")
-	if err != nil {
-		t.Fatal(err)
+func TestPostAnswersTheNoticeAndTheStreamTheState(t *testing.T) {
+	f := newFixture(t)
+	f.installQbzd()
+	s := f.openStream()
+	s.batch("event: dac")
+	// an action: the notice, with the modal out of band; the row's link on
+	// the stream
+	code, body := f.post("/components/action", url.Values{"kind": {"role"}, "name": {"qbzd"}, "action": {"login"}}, true)
+	if code != 200 || strings.Contains(body, "<html") || strings.Contains(body, "<section") {
+		t.Errorf("code = %d, body = %q", code, body)
 	}
-	defer resp.Body.Close()
-	body, _ = io.ReadAll(resp.Body)
-	wants(t, string(body), "event: fragment\n", "event: end\n")
-	_, page := f.get("/")
-	if strings.Contains(page, "app.js") {
-		t.Error("script still loaded after the run")
+	wants(t, body, `<div class="banner ok">Log in to Qobuz: open the link below to finish.</div>`,
+		`<div id="modal" hx-swap-oob="innerHTML"><div id="modal-role-qbzd-login" class="scrim" sse-swap="modal-role-qbzd-login" hx-swap="outerHTML">`,
+		"https://qobuz.test/oauth?id=1")
+	stream := s.batch(`href="https://qobuz.test/oauth?id=1"`)
+	if strings.Contains(stream, "open the link below") {
+		t.Error("the notice is the POST's answer, never on the stream")
 	}
+	// a toggle: the notice alone, the section on the stream
+	code, body = f.post("/components", url.Values{"kind": {"role"}, "name": {"qbzd"}, "enabled": {"0"}}, true)
+	if code != 200 || strings.Contains(body, "<section") || strings.Contains(body, "id=\"modal\"") {
+		t.Errorf("code = %d, body = %q", code, body)
+	}
+	wants(t, body, `<div class="banner ok">Qobuz Connect disabled`)
+	stream = s.batch(">Disabled</span>")
+	last := stream[strings.LastIndex(stream, "event: components\n"):]
+	wants(t, last, `<div id="row-role-qbzd" class="card">`, ">Disabled</span>")
+	// a bad token: 403, and still a notice
+	code, body = f.post("/dac/unset", url.Values{}, false)
+	if code != 403 || strings.Contains(body, "<html") {
+		t.Errorf("code = %d, body = %q", code, body)
+	}
+	wants(t, body, `<div class="banner err">invalid or missing form token`)
 }
 
 func TestActionHostReachesTheArgv(t *testing.T) {
@@ -451,9 +542,6 @@ func TestFinishedRunBecomesANoteOnTheNextRender(t *testing.T) {
 	wants(t, body, `<small class="action"><span class="chip installed">Done</span></small>`)
 	if strings.Contains(body, "qobuz.test/oauth") {
 		t.Error("link survived the end of the run")
-	}
-	if strings.Contains(body, "app.js") {
-		t.Error("page still listens after the run")
 	}
 	// the exit line is written by the reaper goroutine, give it a moment
 	deadline := time.Now().Add(2 * time.Second)
@@ -642,35 +730,35 @@ func TestApplyNowStartsAndWatchesTheUserUnit(t *testing.T) {
 	f.makeUpgradePending()
 	unit := &fakeUnit{active: "inactive", result: "success"}
 	f.useUnit(unit)
+	// an action waiting for its link to be followed is not an upgrade
+	f.installQbzd()
+	f.post("/components/action", url.Values{"kind": {"role"}, "name": {"qbzd"}, "action": {"login"}}, true)
 	_, body := f.post("/upgrade", url.Values{}, true)
-	wants(t, body, "Upgrade started.", "Upgrading…", `<button class="primary" type="button" disabled>`,
-		`<script src="/static/app.js`)
+	wants(t, body, "Upgrade started.")
+	_, body = f.get("/")
+	wants(t, body, "Upgrading…", `<button class="primary" type="button" disabled>`)
 	if starts := f.starts(); len(starts) != 1 || starts[0] != "systemctl --user start --no-block odio-upgrade.service" {
 		t.Errorf("starts = %v", starts)
 	}
 	// a second click is not a second start
 	_, body = f.post("/upgrade", url.Values{}, true)
 	wants(t, body, "Upgrade already running.")
-	if len(f.starts()) != 1 || len(f.spawns) != 0 {
+	if len(f.starts()) != 1 || len(f.spawns) != 1 {
 		t.Errorf("starts = %v, spawns = %v", f.starts(), f.spawns)
 	}
 	// the unit ends having installed qbzd: the watcher notes it, the stream
 	// says so, the card and the row show it
-	resp, err := http.Get(f.srv.URL + "/events")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
+	s := f.openStream()
+	wants(t, s.batch("event: dac"), "Upgrading…")
 	f.installQbzd()
 	unit.set("inactive", "success", 0)
-	stream, _ := io.ReadAll(resp.Body)
-	wants(t, string(stream), "event: fragment\ndata: <div id=\"banners\"></div>",
-		"event: fragment\ndata: <section id=\"upgrade\">",
-		"Upgrade: Done.", "Apply now", "event: end\n")
-	if strings.Contains(string(stream), "Upgrade started.") {
-		t.Error("the POST's banner outlives the run")
+	stream := s.batch("Upgrade: Done.")
+	wants(t, stream, "event: banners\ndata: <div id=\"banners\" sse-swap=\"banners\" hx-swap=\"outerHTML\"></div>",
+		"event: upgrade\ndata: <section id=\"upgrade\"", "Apply now")
+	if strings.Contains(stream, "Upgrade started.") {
+		t.Error("the POST's notice is not the stream's to carry")
 	}
-	last := string(stream)[strings.LastIndex(string(stream), "event: fragment\ndata: <section id=\"components\">"):]
+	last := stream[strings.LastIndex(stream, "event: components\n"):]
 	if !strings.Contains(last, `<div id="row-role-qbzd" class="card">`) || !strings.Contains(last, ">Installed<") {
 		t.Error("the row installed by the run was not swapped in")
 	}
@@ -679,7 +767,7 @@ func TestApplyNowStartsAndWatchesTheUserUnit(t *testing.T) {
 	}
 	_, body = f.get("/")
 	wants(t, body, `<p class="hint outcome">Upgrade: Done.</p>`, "Apply now")
-	if strings.Contains(body, "app.js") || strings.Contains(body, "Upgrading…") {
+	if strings.Contains(body, "Upgrading…") {
 		t.Error("page still shows the run after its end")
 	}
 	wants(t, f.logs.String(), "upgrade: started odio-upgrade.service", "odio-upgrade.service inactive after")
@@ -706,7 +794,7 @@ func TestUpgradeStartedElsewhereIsWatchedNeverStarted(t *testing.T) {
 	unit := &fakeUnit{active: "activating"}
 	f.useUnit(unit)
 	_, body := f.get("/")
-	wants(t, body, "Upgrading…", `<script src="/static/app.js`)
+	wants(t, body, "Upgrading…")
 	f.get("/") // watched once, not probed again
 	if len(f.starts()) != 0 || len(f.spawns) != 0 {
 		t.Errorf("a render started something: starts = %v, spawns = %v", f.starts(), f.spawns)
@@ -742,9 +830,6 @@ func TestUnitFailedBeforeThisProcessIsShown(t *testing.T) {
 	f.useUnit(&fakeUnit{active: "failed", result: "exit-code", code: 1})
 	_, body := f.get("/")
 	wants(t, body, "Upgrade: Failed (exit-code, exit 1).", "Apply now")
-	if strings.Contains(body, "app.js") {
-		t.Error("nothing runs, nothing to listen to")
-	}
 }
 
 func TestApplyWithNothingPendingIsRefused(t *testing.T) {

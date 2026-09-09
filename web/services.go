@@ -207,6 +207,7 @@ func (s *Services) SetComponent(kind components.Kind, name string, enabled bool)
 		State:  s.cfg.StatePath,
 		Output: s.cfg.ResolvedUpgradesPath(),
 	})
+	s.changed()
 	label := components.LabelOf(kind, name)
 	switch {
 	case !enabled:
@@ -289,6 +290,7 @@ func (s *Services) RunAction(kind components.Kind, name, id, host string) (strin
 
 	if url := run.awaitLink(actionLinkTimeout); url != "" {
 		s.log.Printf("action %s/%s: link after %s: %s", name, id, run.elapsed(), url)
+		s.changed() // the row shows the link while the process lives
 		return action.Label + ": open the link below to finish.", run.result(), nil
 	}
 	s.log.Printf("action %s/%s: no link after %s, output so far: %q", name, id, run.elapsed(), run.text())
@@ -317,26 +319,33 @@ func (s *Services) ActionState(kind components.Kind, name, id string) (url strin
 	key := actionKey{kind, name, id}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	run, ok := s.runs[key]
-	if !ok {
-		if done := s.finished[key]; done != nil {
-			return "", done.note()
-		}
-		return "", actionNote{}
-	}
-	if run.alive() {
+	s.reapLocked()
+	if run, ok := s.runs[key]; ok {
 		return run.link(), actionNote{}
 	}
-	delete(s.runs, key)
-	s.finished[key] = run
-	return "", run.note()
+	if done := s.finished[key]; done != nil {
+		return "", done.note()
+	}
+	return "", actionNote{}
 }
 
-// FinishedResults is the end of every reaped action, for the modal that
+// reapLocked moves every exited run to finished; s.mu held. A run being
+// stopped is still alive and stays where a second click finds it.
+func (s *Services) reapLocked() {
+	for key, run := range s.runs {
+		if !run.alive() {
+			delete(s.runs, key)
+			s.finished[key] = run
+		}
+	}
+}
+
+// FinishedResults is the end of every exited action, for the modal that
 // showed its link: the same output, a Done button where the link was.
 func (s *Services) FinishedResults() []*ActionResult {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.reapLocked()
 	var out []*ActionResult
 	for _, run := range s.finished {
 		out = append(out, run.result())
@@ -344,20 +353,11 @@ func (s *Services) FinishedResults() []*ActionResult {
 	return out
 }
 
-// Busy reports whether anything followed — an action, the upgrade — is still
-// running: the page then loads app.js and listens on /events.
-func (s *Services) Busy() bool {
+// upgrading reports whether a watcher follows odio-upgrade.service.
+func (s *Services) upgrading() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.watching {
-		return true
-	}
-	for _, run := range s.runs {
-		if run.alive() {
-			return true
-		}
-	}
-	return false
+	return s.watching
 }
 
 // StartUpgrade starts odio-upgrade.service (= `sudo odioctl upgrade apply
@@ -369,7 +369,7 @@ func (s *Services) StartUpgrade() (string, error) {
 	if report == nil || !report.UpgradeAvailable {
 		return "", userErrorf("nothing to apply — no upgrade or pending component reported")
 	}
-	if s.Busy() {
+	if s.upgrading() {
 		return "Upgrade already running.", nil
 	}
 	args := []string{"systemctl", "--user", "start", "--no-block", UpgradeUnit}
@@ -378,6 +378,7 @@ func (s *Services) StartUpgrade() (string, error) {
 	}
 	s.log.Printf("upgrade: started %s", UpgradeUnit)
 	s.watchUpgrade()
+	s.changed()
 	return "Upgrade started.", nil
 }
 
@@ -523,6 +524,7 @@ func (s *Services) SetDAC(id string) (string, error) {
 	if err := s.runDac("dac", "set", id); err != nil {
 		return "", err
 	}
+	s.changed()
 	return "DAC set to " + id + " — reboot required.", nil
 }
 
@@ -531,6 +533,7 @@ func (s *Services) UnsetDAC() (string, error) {
 	if err := s.runDac("dac", "unset"); err != nil {
 		return "", err
 	}
+	s.changed()
 	return "DAC block removed — reboot required.", nil
 }
 

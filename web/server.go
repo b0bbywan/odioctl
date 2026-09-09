@@ -1,11 +1,11 @@
 package web
 
-// The HTTP end of the settings UI: routes and the server. Plain HTML forms
-// (POST re-renders the page), no JSON API; the one script listens on
-// /events while something runs. Runs as the target
-// user (systemd --user unit). No authentication: same LAN trust model as
-// odio-api. Every form carries a per-process token so a cross-site HTML form
-// cannot drive the box.
+// The HTTP end of the settings UI: routes and the server. HTML forms over
+// htmx, no JSON API: a POST is answered with the notice and the state
+// follows on /events, the stream every section listens to; GET / is the
+// only page render. Runs as the target user (systemd --user unit). No
+// authentication: same LAN trust model as odio-api. Every form carries a
+// per-process token so a cross-site HTML form cannot drive the box.
 
 import (
 	"crypto/subtle"
@@ -27,7 +27,7 @@ import (
 
 const maxBody = 16 * 1024
 
-// errBadToken is answered with a bare 403, not a re-render.
+// errBadToken is answered with a 403 carrying the error banner.
 var errBadToken = errors.New("invalid or missing form token — reload the page and retry")
 
 type handler struct {
@@ -52,7 +52,12 @@ func NewHandler(svc *Services) http.Handler {
 }
 
 func (h *handler) page(w http.ResponseWriter, r *http.Request) {
-	h.servePage(w, http.StatusOK, PageData{Host: hostOf(r)})
+	body, err := RenderPage(h.svc, hostOf(r))
+	if err != nil {
+		sendStatus(w, http.StatusInternalServerError, "")
+		return
+	}
+	sendHTML(w, http.StatusOK, body)
 }
 
 func (h *handler) static(w http.ResponseWriter, r *http.Request) {
@@ -66,11 +71,11 @@ func (h *handler) static(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(content)
 }
 
-// events is the live channel behind static/app.js: one SSE "change" event
-// when something the page shows has changed (an action or the upgrade ended), and the
-// script reloads the page — the server still renders everything. The stream
-// lives as long as the tab; a comment every 15s keeps idle proxies from
-// dropping it.
+// events is the stream the page connects to on load (sse-connect on the
+// body) and keeps: every section as a named event, at once and then on
+// each change. The wake channel is taken before each render, so a change
+// during it still fires. A comment every 15s keeps idle proxies from
+// dropping the stream.
 func (h *handler) events(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -80,13 +85,8 @@ func (h *handler) events(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
-	// Send at once: the page only asks while something runs, and it may
-	// have ended between its render and this connection. The wake channel
-	// is taken before each render, so an end after it still fires.
 	wake := h.svc.Wake()
-	if h.sendFragments(w, flusher) {
-		return
-	}
+	h.sendSections(w, flusher)
 	ping := time.NewTicker(15 * time.Second)
 	defer ping.Stop()
 	for {
@@ -95,9 +95,7 @@ func (h *handler) events(w http.ResponseWriter, r *http.Request) {
 			return
 		case <-wake:
 			wake = h.svc.Wake()
-			if h.sendFragments(w, flusher) {
-				return
-			}
+			h.sendSections(w, flusher)
 		case <-ping.C:
 			fmt.Fprint(w, ": ping\n\n")
 			flusher.Flush()
@@ -105,27 +103,19 @@ func (h *handler) events(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// sendFragments writes every fragment, then "end" when nothing runs any
-// more — decided before rendering, so an end after it still wakes this
-// loop; true when the stream is over.
-func (h *handler) sendFragments(w io.Writer, flusher http.Flusher) (over bool) {
-	over = !h.svc.Busy()
-	frags, err := RenderFragments(h.svc)
+func (h *handler) sendSections(w io.Writer, flusher http.Flusher) {
+	sections, err := RenderSections(h.svc)
 	if err != nil {
 		h.svc.log.Printf("events: %v", err)
 	}
-	for _, f := range frags {
-		fmt.Fprint(w, "event: fragment\n")
-		for _, line := range strings.Split(strings.TrimSpace(f), "\n") {
+	for _, s := range sections {
+		fmt.Fprintf(w, "event: %s\n", s.Event)
+		for _, line := range strings.Split(strings.TrimSpace(s.HTML), "\n") {
 			fmt.Fprintf(w, "data: %s\n", line)
 		}
 		fmt.Fprint(w, "\n")
 	}
-	if over {
-		fmt.Fprint(w, "event: end\ndata: -\n\n")
-	}
 	flusher.Flush()
-	return over
 }
 
 // -- the form actions ----------------------------------------------------
@@ -194,8 +184,10 @@ func sendStatus(w http.ResponseWriter, code int, detail string) {
 	sendHTML(w, code, fmt.Sprintf("<h1>%d</h1>%s", code, detail))
 }
 
-func (h *handler) servePage(w http.ResponseWriter, code int, p PageData) {
-	body, err := RenderPage(h.svc, p)
+// notice answers a POST: the banner for #notice, the modal of an action
+// out of band; the page's sections follow on /events.
+func notice(w http.ResponseWriter, code int, msg, errText string, modal *ActionResult) {
+	body, err := RenderNotice(msg, errText, modal)
 	if err != nil {
 		sendStatus(w, http.StatusInternalServerError, "")
 		return
@@ -203,33 +195,32 @@ func (h *handler) servePage(w http.ResponseWriter, code int, p PageData) {
 	sendHTML(w, code, body)
 }
 
-// form lifts a formAction into a handler: token-checked form in, re-rendered
-// page out — an error becomes the banner, a *UserError brings its modal.
+// form lifts a formAction into a handler: token-checked form in, the
+// notice out — an error becomes the banner, a *UserError brings its modal.
 func (h *handler) form(action formAction) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		form, err := h.readForm(r)
 		if err != nil {
 			h.svc.log.Printf("POST %s from %s: %v", r.URL.Path, r.RemoteAddr, err)
+			code := http.StatusOK
 			if errors.Is(err, errBadToken) {
-				sendStatus(w, http.StatusForbidden, "<p>"+errBadToken.Error()+"</p>")
-				return
+				code = http.StatusForbidden
 			}
-			h.servePage(w, http.StatusOK, PageData{Error: err.Error(), Host: hostOf(r)})
+			notice(w, code, "", err.Error(), nil)
 			return
 		}
 		msg, result, err := action(form, hostOf(r))
 		if err != nil {
 			h.svc.log.Printf("POST %s from %s: error: %v", r.URL.Path, r.RemoteAddr, err)
-			p := PageData{Error: err.Error(), Host: hostOf(r)}
 			var ue *UserError
 			if errors.As(err, &ue) {
-				p.Result = ue.Modal
+				result = ue.Modal
 			}
-			h.servePage(w, http.StatusOK, p)
+			notice(w, http.StatusOK, "", err.Error(), result)
 			return
 		}
 		h.svc.log.Printf("POST %s from %s: %s", r.URL.Path, r.RemoteAddr, msg)
-		h.servePage(w, http.StatusOK, PageData{Message: msg, Result: result, Host: hostOf(r)})
+		notice(w, http.StatusOK, msg, "", result)
 	}
 }
 

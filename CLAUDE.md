@@ -85,22 +85,28 @@ since rewritten in Go.
   group-writable and its tag ends up in a `curl … | bash` run as root. The tag
   and the version are two strings: `pr-84` publishes `2026.7.0rc2-9-gcad916c`,
   hence `target_tag` next to `latest` in upgrades.json.
-- **The web UI is server-rendered HTML forms only** — no JSON API. The one
-  script, `web/static/app.js`, is loaded only while something runs: it
-  listens to `GET /events` (SSE) and swaps in the *fragments* the server
-  sends on a change — the banner strip (minus the POST's own message: the
-  card or row it announced now shows the outcome), the upgrade card, the
-  whole Components section (an upgrade installs rows, not only the ones
-  with actions), the modal of a finished action, each rendered by the
-  page's own templates (`web.RenderFragments`) and replaced by the `id` on
-  its root element — until `end` says nothing runs. It never builds markup and never POSTs;
-  forms stay the way to act. Markup lives in `web/templates/*.html` (`html/template`:
-  composition via `{{range}}`/`{{if}}`/`{{template}}` stays in the templates,
-  Go builds view models only, escaping is the engine's), styling in
-  `web/static/style.css` which hand-mirrors odio-ui's look (go-odio-api:
-  forest zinc palette, lime accent) so both pages on the box feel like one
-  product — keep it in sync, no Tailwind/htmx. A POST re-renders the page
-  (no redirects, no query-string state).
+- **The web UI is server-rendered HTML over htmx, the way odio-api's is** —
+  no JSON API, no script of our own. `web/static/htmx.min.js` and
+  `htmx-sse.js` are odio-api's copies (same version, keep them so). The
+  body opens `GET /events` (`sse-connect`) on load and keeps it; the server
+  sends every section as a named event — `banners`, `upgrade`, `components`,
+  `dac`, and `modal-<key>` for each finished action — on connect and on every
+  `Services.changed()`, rendered by the page's own templates
+  (`web.RenderSections`). Each section's root carries `sse-swap="<name>"
+  hx-swap="outerHTML"` and replaces itself; a modal listens to its own id, so
+  only a page showing it takes its end. Forms are `hx-post` with
+  `hx-target="#notice"`, nothing else (no script, no page): the answer to
+  a POST is the notice alone (`web.RenderNotice`: the ok/err banner, and an
+  action's modal out of band into `#modal`), the state follows on the
+  stream — so every mutation ends in `changed()`. `GET /` is the only page
+  render. Never put `hx-target`/`hx-swap` on an ancestor of a
+  section: htmx inherits them and the stream's swaps would follow. Markup
+  lives in `web/templates/*.html` (`html/template`: composition via
+  `{{range}}`/`{{if}}`/`{{template}}` stays in the templates, Go builds view
+  models only, escaping is the engine's), styling in `web/static/style.css`
+  which hand-mirrors odio-ui's look (go-odio-api: forest zinc palette, lime
+  accent) so both pages on the box feel like one product — keep it in sync,
+  no Tailwind. No redirects, no query-string state.
 - **`components.Action` = a command the box runs for the user**, so nobody
   needs a shell on it. `Argv` lives in the catalog and is never built from the
   request — only `{host}` (the name the browser reached the box by, so an
@@ -112,7 +118,7 @@ since rewritten in Go.
   output comes back in a modal: the POST response carries it and `Close` is a
   link to `/`, so it shows once. What persists is the row's own link while
   the process lives, then a Done badge or the failure with its exit code —
-  `app.js` swaps the row and the modal in on the exit. Offered for
+  the stream swaps the row and the modal in on the exit. Offered for
   installed components only. qbzd's `login` is the first one: it prints its
   Qobuz URL, then holds a one-shot listener for 300s waiting for the browser
   to come back to `{host}`. Tidal's runs upmpdcli's own `get_credentials.py`,
