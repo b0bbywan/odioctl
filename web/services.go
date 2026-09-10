@@ -14,7 +14,6 @@ import (
 	"io"
 	"log"
 	"os"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -28,14 +27,6 @@ import (
 // actionLinkTimeout is how long a component action gets to print its link.
 // `qbzd login` fetches an app id over the network first, so it is not instant.
 var actionLinkTimeout = 15 * time.Second
-
-// upgradePoll is how often the watcher asks systemd about odio-upgrade.service
-// when it cannot be told (no units directory to watch); upgradeRecheck is
-// the net behind the events when it can.
-var (
-	upgradePoll    = 2 * time.Second
-	upgradeRecheck = 15 * time.Second
-)
 
 // UserError is a failure the page shows as an error banner; Modal carries the
 // action's output when there is some to show alongside it.
@@ -414,60 +405,22 @@ func (s *Services) StartUpgrade() (string, error) {
 	if s.upgrading() {
 		return "Upgrade already running.", nil
 	}
-	args := []string{"systemctl", "--user", "start", "--no-block", UpgradeUnit}
-	if err := runChecked(s.run.User, args, "systemctl --user start "+UpgradeUnit); err != nil {
-		return "", err
+	if err := upgrade.StartUnit(); err != nil {
+		return "", userErrorf("cannot start %s: %v", upgrade.Unit, err)
 	}
-	s.log.Printf("upgrade: started %s", UpgradeUnit)
+	s.log.Printf("upgrade: started %s", upgrade.Unit)
 	s.watchUpgrade()
 	s.changed("upgrade")
 	return "Upgrade started.", nil
 }
 
-// unitState is what `systemctl show` says of odio-upgrade.service.
-type unitState struct {
-	Active string // activating while the oneshot runs, then inactive or failed
-	Result string // success, exit-code, …
-	Code   int    // ExecMainStatus
-}
-
-func (u unitState) running() bool { return u.Active == "activating" }
-
-// note is the end of a run, as the card shows it; a unit never run or run
-// to success reads the same (inactive, success).
-func (u unitState) note() actionNote {
-	if u.Active == "failed" {
+// unitNote is the end of a run, as the card shows it; a unit never run or
+// run to success reads the same (inactive, success).
+func unitNote(u upgrade.UnitState) actionNote {
+	if u.Failed() {
 		return actionNote{Text: fmt.Sprintf("Failed (%s, exit %d).", u.Result, u.Code), Failed: true}
 	}
 	return actionNote{Text: "Done."}
-}
-
-// showUpgrade asks systemd; the error is logged, and read as not running.
-// `show` prints Key=Value lines in systemd's own order, not the -p order
-// (Result and ExecMainStatus come before ActiveState), hence keyed.
-func (s *Services) showUpgrade() (unitState, error) {
-	res, err := s.run.User([]string{"systemctl", "--user", "show",
-		"-p", "ActiveState", "-p", "Result", "-p", "ExecMainStatus", UpgradeUnit})
-	if err == nil && res.Code != 0 {
-		err = fmt.Errorf("exit %d: %s", res.Code, strings.TrimSpace(res.Stderr))
-	}
-	if err != nil {
-		s.log.Printf("upgrade: systemctl show %s: %v", UpgradeUnit, err)
-		return unitState{}, err
-	}
-	var u unitState
-	for _, line := range strings.Split(res.Stdout, "\n") {
-		key, value, _ := strings.Cut(strings.TrimSpace(line), "=")
-		switch key {
-		case "ActiveState":
-			u.Active = value
-		case "Result":
-			u.Result = value
-		case "ExecMainStatus":
-			u.Code, _ = strconv.Atoi(value)
-		}
-	}
-	return u, nil
 }
 
 // watchUpgrade follows the unit to its end, then keeps that as the note and
@@ -480,45 +433,16 @@ func (s *Services) watchUpgrade() {
 	}
 	s.watching = true
 	s.upgradeNote = actionNote{}
-	go s.followUpgrade(time.Now())
-}
-
-// followUpgrade waits to be told the unit is over, then asks systemd how.
-// The word comes from its invocation link leaving the units directory
-// (systemd removes it as the unit leaves activating) with a slow tick
-// behind; without the directory it is polled. No probe up front: `start
-// --no-block` returns before the unit is activating.
-func (s *Services) followUpgrade(started time.Time) {
-	interval := upgradeRecheck
-	gone, stop, err := removedFrom(s.cfg.UnitsDir(), "invocation:"+UpgradeUnit, s.log.Printf)
-	if err != nil {
-		s.log.Printf("upgrade: cannot watch %s (%v), polling %s", s.cfg.UnitsDir(), err, UpgradeUnit)
-		interval = upgradePoll // gone is nil: never fires
-	} else {
-		defer stop()
-	}
-	tick := time.NewTicker(interval)
-	defer tick.Stop()
-	for {
-		select {
-		case <-gone:
-		case <-tick.C:
-		}
-		if u, err := s.showUpgrade(); err == nil && !u.running() {
-			s.endUpgrade(u, started)
-			return
-		}
-	}
-}
-
-// endUpgrade keeps how the unit ended as the note and wakes the pages.
-func (s *Services) endUpgrade(u unitState, started time.Time) {
-	note := u.note()
-	s.log.Printf("upgrade: %s %s after %s (%s)", UpgradeUnit, u.Active, time.Since(started).Round(time.Second), note.Text)
-	s.mu.Lock()
-	s.watching, s.upgradeNote = false, note
-	s.mu.Unlock()
-	s.changed("upgrade", "components") // the run installs rows
+	started := time.Now()
+	go func() {
+		u := upgrade.WaitUnit(s.cfg.UnitsDir(), s.log.Printf)
+		note := unitNote(u)
+		s.log.Printf("upgrade: %s %s after %s (%s)", upgrade.Unit, u.Active, time.Since(started).Round(time.Second), note.Text)
+		s.mu.Lock()
+		s.watching, s.upgradeNote = false, note
+		s.mu.Unlock()
+		s.changed("upgrade", "components") // the run installs rows
+	}()
 }
 
 // UpgradeState is (running, note of the last run). Without a watcher of its
@@ -536,16 +460,17 @@ func (s *Services) UpgradeState(report *upgrade.Report) (running bool, note acti
 	if report == nil || !report.UpgradeAvailable {
 		return false, note
 	}
-	u, err := s.showUpgrade()
+	u, err := upgrade.ShowUnit()
 	switch {
 	case err != nil:
+		s.log.Printf("upgrade: %v", err)
 		return false, note
-	case u.running():
-		s.log.Printf("upgrade: %s is activating, watching it", UpgradeUnit)
+	case u.Running():
+		s.log.Printf("upgrade: %s is activating, watching it", upgrade.Unit)
 		s.watchUpgrade()
 		return true, actionNote{}
-	case u.Active == "failed":
-		return false, u.note()
+	case u.Failed():
+		return false, unitNote(u)
 	}
 	return false, note
 }

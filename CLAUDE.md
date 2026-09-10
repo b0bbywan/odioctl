@@ -17,7 +17,8 @@ since rewritten in Go.
   backfill of rc1–rc3 shapes, no dpkg reconstruction, no `odio-upgrade` compat
   CLI. Refuse loudly (exit 2) instead.
 - **Test seams are explicit**: swappable package vars (`manifest.Fetch`,
-  `upgrade.runInstall`, `dac.RebootFlag`) and injected funcs (`web.Runners`).
+  `upgrade.runInstall`, `upgrade.Systemctl`, `dac.RebootFlag`) and injected
+  funcs (`web.Runners`).
   Tests live in the package they test and swap the seam with `t.Cleanup`;
   never reach around a seam to mock deeper.
 - **The `cli` package only parses argv.** Command behavior lives in the owning
@@ -43,17 +44,18 @@ since rewritten in Go.
   web process: "Apply now" does `systemctl --user start --no-block
   odio-upgrade.service` (the unit odio-api drives too) and that token-checked
   POST is the only place the unit is ever started — a render observes. What
-  the card shows comes from systemd, not from a held child: a watcher
-  (`Services.watchUpgrade`) waits on `$XDG_RUNTIME_DIR/systemd/units`
-  (fsnotify, `Config.RuntimeDir`) for the `invocation:odio-upgrade.service`
-  link systemd removes as the oneshot leaves `activating`, then reads
-  `systemctl show` once — by key: `show` prints properties in systemd's
-  order, never the `-p` one — and keeps `Result`/`ExecMainStatus` as the
-  note. No probe right after `start --no-block`: it returns before the unit
-  is activating. A slow tick backs the events; without the directory the
-  unit is polled. A unit found `activating` at render time (odio-api started
-  it, or the web restarted under it) gets a watcher; one found `failed` is
-  shown as such.
+  the card shows comes from systemd, not from a held child. The unit is the
+  `upgrade` package's (`upgrade/unit.go`): `StartUnit`, `ShowUnit` (by key:
+  `show` prints properties in systemd's order, never the `-p` one) and
+  `WaitUnit`, which waits on `$XDG_RUNTIME_DIR/systemd/units` (fsnotify,
+  `Config.RuntimeDir`) for the `invocation:odio-upgrade.service` link
+  systemd removes as the oneshot leaves `activating`, then asks `show` how
+  it ended; a slow tick backs the events, and without the directory the
+  unit is polled. No probe right after `start --no-block`: it returns
+  before the unit is activating. `web` keeps only the policy: one watcher
+  at a time, `Result`/`ExecMainStatus` as the card's note, a unit found
+  `activating` at render time (odio-api started it, or the web restarted
+  under it) gets a watcher, one found `failed` is shown as such.
   The playbook's last step re-runs `check`, so upgrades.json settles by itself.
 - **Two groups, on purpose.** `odio` is odios' state group (read/write on
   `/var/lib/odio`), and odios puts the installing user in it too. `odioctl` is
