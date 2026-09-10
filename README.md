@@ -133,8 +133,9 @@ argument (in particular `--config`) can go through sudo.
 A stdlib `net/http` server on port 8021 serving one server-rendered page —
 HTML forms over htmx (the same htmx and SSE extension as odio-api's
 dashboard), no JSON API: a components table with Enable/Disable buttons,
-and a DAC picker (select + Apply, Reset to drop the odioctl block). Actions
-are `POST /components`, `POST /dac`, `POST /dac/unset`; the page answers with
+and a DAC picker (select + Apply, Reset to drop the odioctl block, then a
+Reboot button on the banner the change leaves). Actions are
+`POST /components`, `POST /dac`, `POST /dac/unset`, `POST /reboot`; the page answers with
 a message or error banner and every section follows the box live over
 `GET /events`. Every form carries a per-process token, so a cross-site page
 cannot drive the box. There

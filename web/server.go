@@ -48,6 +48,7 @@ func NewHandler(svc *Services) http.Handler {
 	mux.HandleFunc("POST /dac", h.form(h.setDAC))
 	mux.HandleFunc("POST /dac/unset", h.form(h.unsetDAC))
 	mux.HandleFunc("POST /upgrade", h.form(h.startUpgrade))
+	mux.HandleFunc("POST /reboot", h.form(h.reboot))
 	return mux
 }
 
@@ -160,6 +161,11 @@ func (h *handler) unsetDAC(url.Values, string) (string, *ActionResult, error) {
 
 func (h *handler) startUpgrade(url.Values, string) (string, *ActionResult, error) {
 	msg, err := h.svc.StartUpgrade()
+	return msg, nil, err
+}
+
+func (h *handler) reboot(url.Values, string) (string, *ActionResult, error) {
+	msg, err := h.svc.Reboot()
 	return msg, nil, err
 }
 
