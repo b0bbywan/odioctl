@@ -48,7 +48,7 @@ func NewHandler(app *App) http.Handler {
 	mux.HandleFunc("POST /dac", h.form(h.setDAC))
 	mux.HandleFunc("POST /dac/unset", h.form(h.unsetDAC))
 	mux.HandleFunc("POST /upgrade", h.form(h.startUpgrade))
-	mux.HandleFunc("POST /reboot", h.form(h.reboot))
+	mux.HandleFunc("POST /reboot", h.reboot)
 	return mux
 }
 
@@ -164,11 +164,6 @@ func (h *handler) startUpgrade(url.Values, string) (string, *ActionResult, error
 	return msg, nil, err
 }
 
-func (h *handler) reboot(url.Values, string) (string, *ActionResult, error) {
-	msg, err := h.app.Reboot()
-	return msg, nil, err
-}
-
 // formKind narrows the request's kind field to the catalog's two kinds.
 func formKind(form url.Values) (components.Kind, error) {
 	kind := form.Get("kind")
@@ -205,14 +200,8 @@ func notice(w http.ResponseWriter, code int, msg, errText string, modal *ActionR
 // notice out — an error becomes the banner, a *UserError brings its modal.
 func (h *handler) form(action formAction) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		form, err := h.readForm(r)
-		if err != nil {
-			h.app.log.Printf("POST %s from %s: %v", r.URL.Path, r.RemoteAddr, err)
-			code := http.StatusOK
-			if errors.Is(err, errBadToken) {
-				code = http.StatusForbidden
-			}
-			notice(w, code, "", err.Error(), nil)
+		form, ok := h.checkedForm(w, r)
+		if !ok {
 			return
 		}
 		msg, result, err := action(form, hostOf(r))
@@ -228,6 +217,37 @@ func (h *handler) form(action formAction) http.HandlerFunc {
 		h.app.log.Printf("POST %s from %s: %s", r.URL.Path, r.RemoteAddr, msg)
 		notice(w, http.StatusOK, msg, "", result)
 	}
+}
+
+// reboot answers before it acts: the box goes down the moment logind takes
+// the request, this connection with it, so the notice has to be on the
+// wire first. A refusal reaches the page on the banners, through the stream.
+func (h *handler) reboot(w http.ResponseWriter, r *http.Request) {
+	if _, ok := h.checkedForm(w, r); !ok {
+		return
+	}
+	h.app.log.Printf("POST /reboot from %s: rebooting", r.RemoteAddr)
+	notice(w, http.StatusOK, "Rebooting — odio will be back soon.", "", nil)
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+	h.app.Reboot()
+}
+
+// checkedForm is the prologue of every POST: the token-checked form, or
+// the error notice already written and false.
+func (h *handler) checkedForm(w http.ResponseWriter, r *http.Request) (url.Values, bool) {
+	form, err := h.readForm(r)
+	if err != nil {
+		h.app.log.Printf("POST %s from %s: %v", r.URL.Path, r.RemoteAddr, err)
+		code := http.StatusOK
+		if errors.Is(err, errBadToken) {
+			code = http.StatusForbidden
+		}
+		notice(w, code, "", err.Error(), nil)
+		return nil, false
+	}
+	return form, true
 }
 
 func (h *handler) readForm(r *http.Request) (url.Values, error) {

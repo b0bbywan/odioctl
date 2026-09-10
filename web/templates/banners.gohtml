@@ -1,2 +1,3 @@
 <div id="banners" sse-swap="banners" hx-swap="outerHTML">{{if .RebootRequired}}<div class="banner warn">A reboot is required to apply the DAC change.<form hx-post="/reboot" hx-target="#notice" hx-swap="innerHTML" hx-confirm="Reboot the system?"><input type="hidden" name="token" value="{{.Token}}"><button class="small" type="submit">Reboot now</button></form></div>
+{{end}}{{if .RebootError}}<div class="banner err">Reboot failed: {{.RebootError}}</div>
 {{end}}</div>
