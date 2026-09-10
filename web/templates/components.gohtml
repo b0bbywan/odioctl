@@ -2,6 +2,6 @@
 <h2>Components</h2>
 {{if .Err}}<div class="banner err">{{.Err}}</div>{{else}}{{range .Groups}}<h3>{{.Title}}</h3>
 <div class="cards">
-{{range .Rows}}{{template "component_row.html" .}}
+{{range .Rows}}{{template "component_row.gohtml" .}}
 {{end}}</div>
 {{end}}{{end}}</section>

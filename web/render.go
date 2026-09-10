@@ -1,6 +1,6 @@
 package web
 
-// The page: view models built from Services, markup in templates/*.html —
+// The page: view models built from Services, markup in templates/*.gohtml —
 // composition ({{range}}, {{if}}, {{template}}) lives in the templates,
 // escaping in html/template. The stylesheet and logo in static/ mirror
 // odio-ui's look (go-odio-api), htmx and its SSE extension are odio-api's
@@ -22,13 +22,13 @@ import (
 	"github.com/b0bbywan/odioctl/upgrade"
 )
 
-//go:embed templates/*.html
+//go:embed templates/*.gohtml
 var templatesFS embed.FS
 
 //go:embed static/style.css static/logo.png static/htmx.min.js static/htmx-sse.js
 var staticFS embed.FS
 
-var templates = template.Must(template.ParseFS(templatesFS, "templates/*.html"))
+var templates = template.Must(template.ParseFS(templatesFS, "templates/*.gohtml"))
 
 var staticTypes = map[string]string{
 	"style.css":   "text/css; charset=utf-8",
@@ -104,11 +104,8 @@ type upgradeView struct {
 
 type pageView struct {
 	Version, UIURL, Hostname string
-	Odios                    string // "" = no badge
-	Banners                  bannersView
-	Upgrade                  upgradeView
-	Components               componentsView
-	Dac                      dacView
+	Odios                    string          // "" = no badge
+	Sections                 []template.HTML // each rendered by its own template, in sections order
 }
 
 // noticeView is the outcome of a POST: its banner, and the modal of an
@@ -313,49 +310,75 @@ func bannersOf(svc *Services, d dac.Status) bannersView {
 // band, the modal of an action. The state follows on the stream.
 func RenderNotice(msg, errText string, modal *ActionResult) (string, error) {
 	var b strings.Builder
-	if err := templates.ExecuteTemplate(&b, "notice.html", noticeViewOf(msg, errText, modal)); err != nil {
+	if err := templates.ExecuteTemplate(&b, "notice.gohtml", noticeViewOf(msg, errText, modal)); err != nil {
 		return "", err
 	}
 	return b.String(), nil
 }
 
-// Section is one /events event: the element it carries swaps itself in,
-// listening to Event by name (sse-swap on its root).
+// Section is one piece of the page and one event on the stream: its
+// template, <Name>.gohtml, has a root listening to Name (sse-swap) that
+// swaps itself. sections is the page's order.
 type Section struct {
+	Name string
+	view func(svc *Services) any
+}
+
+var sections = []Section{
+	{"banners", func(svc *Services) any { return bannersOf(svc, svc.DacStatus()) }},
+	{"upgrade", func(svc *Services) any { return upgradeViewOf(svc, svc.UpgradeReport()) }},
+	{"components", func(svc *Services) any { st, err := stateOf(svc); return componentsViewOf(svc, st, err) }},
+	{"dac", func(svc *Services) any { return dacViewOf(svc, svc.DacStatus()) }},
+}
+
+// SectionNames is every section, what a stream sends first.
+func SectionNames() []string {
+	names := make([]string, len(sections))
+	for i, sec := range sections {
+		names[i] = sec.Name
+	}
+	return names
+}
+
+func render(name string, data any) (string, error) {
+	var b strings.Builder
+	err := templates.ExecuteTemplate(&b, name, data)
+	return b.String(), err
+}
+
+// Fragment is one event on the stream.
+type Fragment struct {
 	Event, HTML string
 }
 
-// RenderSections is the whole state as the stream sends it on connect and
-// on every change: the modal of each finished action (only a page showing
-// it listens), the banners, the upgrade card, the Components section (an
-// upgrade installs rows) and the DAC one — from the page's own templates.
-func RenderSections(svc *Services) ([]Section, error) {
-	var out []Section
-	add := func(event, name string, data any) error {
-		var b strings.Builder
-		if err := templates.ExecuteTemplate(&b, name, data); err != nil {
-			return err
-		}
-		out = append(out, Section{Event: event, HTML: b.String()})
-		return nil
+// RenderFragments is what a change named: sections in the page's order,
+// then the modal of a finished action by its id (only a page showing it
+// listens). A name that is neither is nothing.
+func RenderFragments(svc *Services, names []string) ([]Fragment, error) {
+	want := map[string]bool{}
+	for _, n := range names {
+		want[n] = true
 	}
-	for _, res := range svc.FinishedResults() {
-		if err := add(res.ID, "modal.html", modalView(res)); err != nil {
+	var out []Fragment
+	for _, sec := range sections {
+		if !want[sec.Name] {
+			continue
+		}
+		html, err := render(sec.Name+".gohtml", sec.view(svc))
+		if err != nil {
 			return nil, err
 		}
+		out = append(out, Fragment{sec.Name, html})
 	}
-	if err := add("banners", "banners.html", bannersOf(svc, svc.DacStatus())); err != nil {
-		return nil, err
-	}
-	if err := add("upgrade", "upgrade.html", upgradeViewOf(svc, svc.UpgradeReport())); err != nil {
-		return nil, err
-	}
-	st, stateErr := stateOf(svc)
-	if err := add("components", "components.html", componentsViewOf(svc, st, stateErr)); err != nil {
-		return nil, err
-	}
-	if err := add("dac", "dac.html", dacViewOf(svc, svc.DacStatus())); err != nil {
-		return nil, err
+	for _, res := range svc.FinishedResults() {
+		if !want[res.ID] {
+			continue
+		}
+		html, err := render("modal.gohtml", modalView(res))
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, Fragment{res.ID, html})
 	}
 	return out, nil
 }
@@ -373,8 +396,6 @@ func stateOf(svc *Services) (*state.State, string) {
 // RenderPage is GET /: the sections as they stand, an empty #notice and
 // #modal for the POSTs to fill. host is the Host header the browser used.
 func RenderPage(svc *Services, host string) (string, error) {
-	st, stateErr := stateOf(svc)
-	d := svc.DacStatus()
 	// The Host header when the browser gave one (that name reaches the box),
 	// the box's own hostname otherwise — same address for the odio-ui link
 	// and ssh. The logo is that way home: this page is a settings annex of
@@ -387,20 +408,23 @@ func RenderPage(svc *Services, host string) (string, error) {
 	selfName, _ := os.Hostname()
 
 	view := pageView{
-		Version:    config.AppVersion,
-		UIURL:      uiURL,
-		Hostname:   selfName,
-		Banners:    bannersOf(svc, d),
-		Upgrade:    upgradeViewOf(svc, svc.UpgradeReport()),
-		Components: componentsViewOf(svc, st, stateErr),
-		Dac:        dacViewOf(svc, d),
+		Version:  config.AppVersion,
+		UIURL:    uiURL,
+		Hostname: selfName,
 	}
-	if st != nil {
+	if st, _ := stateOf(svc); st != nil {
 		view.Odios = st.Odios
+	}
+	for _, sec := range sections {
+		html, err := render(sec.Name+".gohtml", sec.view(svc))
+		if err != nil {
+			return "", err
+		}
+		view.Sections = append(view.Sections, template.HTML(html)) // our own template's output, already escaped
 	}
 
 	var b strings.Builder
-	if err := templates.ExecuteTemplate(&b, "page.html", view); err != nil {
+	if err := templates.ExecuteTemplate(&b, "page.gohtml", view); err != nil {
 		return "", err
 	}
 	return b.String(), nil

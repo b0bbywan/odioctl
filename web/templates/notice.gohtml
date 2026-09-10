@@ -1,0 +1,2 @@
+{{range .Notices}}{{template "banner.gohtml" .}}
+{{end}}{{if .Modal}}<div id="modal" hx-swap-oob="innerHTML">{{template "modal.gohtml" .Modal}}</div>{{end}}

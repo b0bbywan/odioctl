@@ -227,11 +227,12 @@ func (f *fixture) openStream() *stream {
 	return s
 }
 
-// batch reads until the batch carrying marker is over — the dac section
-// closes every batch — and returns everything read so far; fatal after 2s.
-func (s *stream) batch(marker string) string {
+// until reads through the end of the event carrying marker and returns
+// what this call read; fatal after 2s.
+func (s *stream) until(marker string) string {
 	s.t.Helper()
-	seen, inDac := false, false
+	var got strings.Builder
+	seen := false
 	deadline := time.After(2 * time.Second)
 	for {
 		select {
@@ -240,16 +241,12 @@ func (s *stream) batch(marker string) string {
 				s.t.Fatalf("stream closed before %q; read:\n%s", marker, s.read.String())
 			}
 			s.read.WriteString(line + "\n")
+			got.WriteString(line + "\n")
 			if strings.Contains(line, marker) {
 				seen = true
 			}
-			if line == "event: dac" {
-				inDac = true
-			} else if line == "" && inDac {
-				if seen {
-					return s.read.String()
-				}
-				inDac = false
+			if seen && line == "" {
+				return got.String()
 			}
 		case <-deadline:
 			s.t.Fatalf("no %q on the stream within 2s; read:\n%s", marker, s.read.String())
@@ -420,7 +417,7 @@ func TestEventsStreamCarriesTheSectionsAsTheActionExits(t *testing.T) {
 
 	// on connect, the state now: the row with its link, every section named
 	s := f.openStream()
-	first := s.batch("event: dac")
+	first := s.until("event: dac")
 	wants(t, first,
 		"event: banners\ndata: <div id=\"banners\" sse-swap=\"banners\" hx-swap=\"outerHTML\">",
 		"event: upgrade\ndata: <section id=\"upgrade\" sse-swap=\"upgrade\" hx-swap=\"outerHTML\">",
@@ -431,17 +428,19 @@ func TestEventsStreamCarriesTheSectionsAsTheActionExits(t *testing.T) {
 		t.Error("a modal on the stream before its action ended")
 	}
 	// the run ends: the row shows Done, and so does the modal, on its own
-	// event (only a page showing it listens)
-	all := s.batch(`disabled>Done</button>`)
-	wants(t, all,
+	// event (only a page showing it listens) — and nothing else is sent
+	batch := s.until(`disabled>Done</button>`)
+	wants(t, batch,
+		"event: components\n",
 		"event: modal-role-qbzd-login\ndata: <div id=\"modal-role-qbzd-login\" class=\"scrim\" sse-swap=\"modal-role-qbzd-login\" hx-swap=\"outerHTML\">",
 		`<span class="chip installed">Done</span>`)
-	last := all[strings.LastIndex(all, "event: components\n"):]
-	if strings.Contains(last, `href="https://qobuz.test`) {
+	if strings.Contains(batch, `href="https://qobuz.test`) {
 		t.Error("the link survived the end of the run")
 	}
-	if strings.Contains(all, "event: end") {
-		t.Error("the stream is the page's: it does not end")
+	for _, untouched := range []string{"event: upgrade\n", "event: dac\n", "event: banners\n", "event: end"} {
+		if strings.Contains(batch, untouched) {
+			t.Errorf("an action's end sent %q", untouched)
+		}
 	}
 }
 
@@ -449,7 +448,7 @@ func TestPostAnswersTheNoticeAndTheStreamTheState(t *testing.T) {
 	f := newFixture(t)
 	f.installQbzd()
 	s := f.openStream()
-	s.batch("event: dac")
+	s.until("event: dac")
 	// an action: the notice, with the modal out of band; the row's link on
 	// the stream
 	code, body := f.post("/components/action", url.Values{"kind": {"role"}, "name": {"qbzd"}, "action": {"login"}}, true)
@@ -459,8 +458,8 @@ func TestPostAnswersTheNoticeAndTheStreamTheState(t *testing.T) {
 	wants(t, body, `<div class="banner ok">Log in to Qobuz: open the link below to finish.</div>`,
 		`<div id="modal" hx-swap-oob="innerHTML"><div id="modal-role-qbzd-login" class="scrim" sse-swap="modal-role-qbzd-login" hx-swap="outerHTML">`,
 		"https://qobuz.test/oauth?id=1")
-	stream := s.batch(`href="https://qobuz.test/oauth?id=1"`)
-	if strings.Contains(stream, "open the link below") {
+	batch := s.until(`href="https://qobuz.test/oauth?id=1"`)
+	if strings.Contains(batch, "open the link below") {
 		t.Error("the notice is the POST's answer, never on the stream")
 	}
 	// a toggle: the notice alone, the section on the stream
@@ -469,9 +468,11 @@ func TestPostAnswersTheNoticeAndTheStreamTheState(t *testing.T) {
 		t.Errorf("code = %d, body = %q", code, body)
 	}
 	wants(t, body, `<div class="banner ok">Qobuz Connect disabled`)
-	stream = s.batch(">Disabled</span>")
-	last := stream[strings.LastIndex(stream, "event: components\n"):]
-	wants(t, last, `<div id="row-role-qbzd" class="card">`, ">Disabled</span>")
+	batch = s.until(">Disabled</span>")
+	wants(t, batch, "event: upgrade\n", "event: components\n", `<div id="row-role-qbzd" class="card">`)
+	if strings.Contains(batch, "event: dac\n") || strings.Contains(batch, "event: banners\n") {
+		t.Error("a toggle re-sent sections it does not touch")
+	}
 	// a bad token: 403, and still a notice
 	code, body = f.post("/dac/unset", url.Values{}, false)
 	if code != 403 || strings.Contains(body, "<html") {
@@ -749,18 +750,17 @@ func TestApplyNowStartsAndWatchesTheUserUnit(t *testing.T) {
 	// the unit ends having installed qbzd: the watcher notes it, the stream
 	// says so, the card and the row show it
 	s := f.openStream()
-	wants(t, s.batch("event: dac"), "Upgrading…")
+	wants(t, s.until("event: dac"), "Upgrading…")
 	f.installQbzd()
 	unit.set("inactive", "success", 0)
-	stream := s.batch("Upgrade: Done.")
-	wants(t, stream, "event: banners\ndata: <div id=\"banners\" sse-swap=\"banners\" hx-swap=\"outerHTML\"></div>",
-		"event: upgrade\ndata: <section id=\"upgrade\"", "Apply now")
-	if strings.Contains(stream, "Upgrade started.") {
+	batch := s.until(">Installed<")
+	wants(t, batch, "event: upgrade\ndata: <section id=\"upgrade\"", "Upgrade: Done.", "Apply now",
+		"event: components\n", `<div id="row-role-qbzd" class="card">`)
+	if strings.Contains(batch, "Upgrade started.") {
 		t.Error("the POST's notice is not the stream's to carry")
 	}
-	last := stream[strings.LastIndex(stream, "event: components\n"):]
-	if !strings.Contains(last, `<div id="row-role-qbzd" class="card">`) || !strings.Contains(last, ">Installed<") {
-		t.Error("the row installed by the run was not swapped in")
+	if strings.Contains(batch, "event: dac\n") {
+		t.Error("an upgrade's end re-sent the DAC section")
 	}
 	if !f.waitWatcherGone() {
 		t.Fatal("watcher still running")
