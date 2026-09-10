@@ -1,6 +1,6 @@
 package web
 
-// The real subprocess runners behind the Services seams.
+// The real subprocess runners behind the Runners seams.
 
 import (
 	"bytes"

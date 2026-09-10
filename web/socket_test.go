@@ -123,7 +123,7 @@ func TestServesOnASocketItDidNotBind(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := &http.Server{Handler: NewHandler(f.svc)}
+	srv := &http.Server{Handler: NewHandler(f.app)}
 	go srv.Serve(inherited)
 	t.Cleanup(func() { srv.Close() })
 	resp, err := http.Get("http://" + ln.Addr().String() + "/")

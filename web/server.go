@@ -31,13 +31,13 @@ const maxBody = 16 * 1024
 var errBadToken = errors.New("invalid or missing form token — reload the page and retry")
 
 type handler struct {
-	svc *Services
+	app *App
 }
 
 // NewHandler is the whole route table; the mux gives unknown paths their 404
 // and a known path with the wrong verb its 405 + Allow.
-func NewHandler(svc *Services) http.Handler {
-	h := &handler{svc: svc}
+func NewHandler(app *App) http.Handler {
+	h := &handler{app: app}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", h.page)
 	mux.HandleFunc("GET /index.html", h.page)
@@ -53,7 +53,7 @@ func NewHandler(svc *Services) http.Handler {
 }
 
 func (h *handler) page(w http.ResponseWriter, r *http.Request) {
-	body, err := RenderPage(h.svc, hostOf(r))
+	body, err := RenderPage(h.app, hostOf(r))
 	if err != nil {
 		sendStatus(w, http.StatusInternalServerError, "")
 		return
@@ -86,8 +86,8 @@ func (h *handler) events(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
-	sub := h.svc.Subscribe()
-	defer h.svc.Unsubscribe(sub)
+	sub := h.app.changes.Subscribe()
+	defer h.app.changes.Unsubscribe(sub)
 	h.sendFragments(w, flusher, SectionNames())
 	ping := time.NewTicker(15 * time.Second)
 	defer ping.Stop()
@@ -105,9 +105,9 @@ func (h *handler) events(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handler) sendFragments(w io.Writer, flusher http.Flusher, names []string) {
-	fragments, err := RenderFragments(h.svc, names)
+	fragments, err := RenderFragments(h.app, names)
 	if err != nil {
-		h.svc.log.Printf("events: %v", err)
+		h.app.log.Printf("events: %v", err)
 	}
 	for _, f := range fragments {
 		fmt.Fprintf(w, "event: %s\n", f.Event)
@@ -130,7 +130,7 @@ func (h *handler) setComponent(form url.Values, _ string) (string, *ActionResult
 	if err != nil {
 		return "", nil, err
 	}
-	msg, err := h.svc.SetComponent(kind, form.Get("name"), form.Get("enabled") == "1")
+	msg, err := h.app.SetComponent(kind, form.Get("name"), form.Get("enabled") == "1")
 	return msg, nil, err
 }
 
@@ -142,7 +142,7 @@ func (h *handler) componentAction(form url.Values, host string) (string, *Action
 	if err != nil {
 		return "", nil, err
 	}
-	return h.svc.RunAction(kind, form.Get("name"), form.Get("action"), host)
+	return h.app.RunAction(kind, form.Get("name"), form.Get("action"), host)
 }
 
 func (h *handler) setDAC(form url.Values, _ string) (string, *ActionResult, error) {
@@ -150,22 +150,22 @@ func (h *handler) setDAC(form url.Values, _ string) (string, *ActionResult, erro
 	if id == "" { // an empty select is not an unset — that is /dac/unset
 		return "", nil, userErrorf("no DAC selected")
 	}
-	msg, err := h.svc.SetDAC(id)
+	msg, err := h.app.SetDAC(id)
 	return msg, nil, err
 }
 
 func (h *handler) unsetDAC(url.Values, string) (string, *ActionResult, error) {
-	msg, err := h.svc.UnsetDAC()
+	msg, err := h.app.UnsetDAC()
 	return msg, nil, err
 }
 
 func (h *handler) startUpgrade(url.Values, string) (string, *ActionResult, error) {
-	msg, err := h.svc.StartUpgrade()
+	msg, err := h.app.upgrades.Start(h.app.UpgradeReport())
 	return msg, nil, err
 }
 
 func (h *handler) reboot(url.Values, string) (string, *ActionResult, error) {
-	msg, err := h.svc.Reboot()
+	msg, err := h.app.Reboot()
 	return msg, nil, err
 }
 
@@ -207,7 +207,7 @@ func (h *handler) form(action formAction) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		form, err := h.readForm(r)
 		if err != nil {
-			h.svc.log.Printf("POST %s from %s: %v", r.URL.Path, r.RemoteAddr, err)
+			h.app.log.Printf("POST %s from %s: %v", r.URL.Path, r.RemoteAddr, err)
 			code := http.StatusOK
 			if errors.Is(err, errBadToken) {
 				code = http.StatusForbidden
@@ -217,7 +217,7 @@ func (h *handler) form(action formAction) http.HandlerFunc {
 		}
 		msg, result, err := action(form, hostOf(r))
 		if err != nil {
-			h.svc.log.Printf("POST %s from %s: error: %v", r.URL.Path, r.RemoteAddr, err)
+			h.app.log.Printf("POST %s from %s: error: %v", r.URL.Path, r.RemoteAddr, err)
 			var ue *UserError
 			if errors.As(err, &ue) {
 				result = ue.Modal
@@ -225,7 +225,7 @@ func (h *handler) form(action formAction) http.HandlerFunc {
 			notice(w, http.StatusOK, "", err.Error(), result)
 			return
 		}
-		h.svc.log.Printf("POST %s from %s: %s", r.URL.Path, r.RemoteAddr, msg)
+		h.app.log.Printf("POST %s from %s: %s", r.URL.Path, r.RemoteAddr, msg)
 		notice(w, http.StatusOK, msg, "", result)
 	}
 }
@@ -242,7 +242,7 @@ func (h *handler) readForm(r *http.Request) (url.Values, error) {
 	if err != nil {
 		return nil, errors.New("cannot parse the form")
 	}
-	if subtle.ConstantTimeCompare([]byte(form.Get("token")), []byte(h.svc.Token())) != 1 {
+	if subtle.ConstantTimeCompare([]byte(form.Get("token")), []byte(h.app.Token())) != 1 {
 		return nil, errBadToken
 	}
 	return form, nil
@@ -285,7 +285,7 @@ func RunServe(stdout, stderr io.Writer, cfg Config) int {
 		}
 		fmt.Fprintf(stdout, "Serving odioctl web UI on http://%s:%d\n", ip, cfg.Port)
 	}
-	return serveUntilSignal(stderr, ln, NewHandler(NewServices(cfg, Runners{Log: stderr})))
+	return serveUntilSignal(stderr, ln, NewHandler(NewApp(cfg, Runners{Log: stderr})))
 }
 
 func serveUntilSignal(stderr io.Writer, ln net.Listener, h http.Handler) int {

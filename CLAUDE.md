@@ -99,7 +99,7 @@ since rewritten in Go.
   each a name, a template `<name>.gohtml` and a view func — rendered in that
   order by `RenderPage` and sent as named events by the stream: all of them
   on connect, then only what a change named. Every mutation ends in
-  `Services.changed(names…)`, which marks those names dirty on every
+  `Changes.Changed(names…)`, which marks those names dirty on every
   `Subscriber` (one per stream): a section's name, or `modal-<key>` for the
   modal of a finished action. Each section's root carries
   `sse-swap="<name>" hx-swap="outerHTML"` and replaces itself; a modal
@@ -148,7 +148,9 @@ make deb     # cross-compiles amd64/armhf/arm64 and packages via nfpm
 
 `versions`, `state`, `manifest`, `netinfo`, `fsutil`, `procutil`, `components`,
 `dac` (+ `dac/gen`, the sudoers generator), `upgrade` (check/apply/verify), `web`
-(config, services, action, render, server, socket + `templates/`, `static/`),
+(config, app — what the handlers hold — and one file per thing that lives
+between requests: changes, actions, upgrades; components and dac for the
+writes; render, server, socket + `templates/`, `static/`),
 `cli`, `main.go` — that is also the import order, no cycles. `config/` holds
 the ldflags-injected version. `data/` (systemd --user units, sudoers),
 `debian/` (postinst, copyright — nfpm.yaml is the package recipe).
