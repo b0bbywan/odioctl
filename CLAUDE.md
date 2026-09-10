@@ -35,7 +35,11 @@ since rewritten in Go.
   `--bind`/`--port` are unchanged.
 - Privilege model: `odioctl web` runs as the odios target user (systemd --user)
   and edits state.json directly; only `config.txt` writes escalate through
-  `sudo -n odioctl dac set <id>` / `dac unset`. Upgrades are never run by the
+  `sudo -n odioctl dac set <id>` / `dac unset`. The reboot the DAC change
+  waits for ("Reboot now" on its banner, `POST /reboot`) is `systemctl
+  reboot` as that user: odios' polkit rule (`10-allow-shutdown.rules`) lets
+  the target user reboot through logind, no sudo, no D-Bus library — the
+  same grant odio-api's power buttons use. Upgrades are never run by the
   web process: "Apply now" does `systemctl --user start --no-block
   odio-upgrade.service` (the unit odio-api drives too) and that token-checked
   POST is the only place the unit is ever started — a render observes. What

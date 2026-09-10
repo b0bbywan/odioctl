@@ -528,6 +528,16 @@ func (s *Services) SetDAC(id string) (string, error) {
 	return "DAC set to " + id + " — reboot required.", nil
 }
 
+// Reboot asks logind, as the target user: odios' polkit rule lets that user
+// reboot, no sudo. The flag under /run goes with the boot.
+func (s *Services) Reboot() (string, error) {
+	if err := runChecked(s.run.User, []string{"systemctl", "reboot"}, "systemctl reboot"); err != nil {
+		return "", err
+	}
+	s.log.Printf("reboot requested")
+	return "Rebooting — the box is back in a minute.", nil
+}
+
 // UnsetDAC removes the odioctl block from config.txt, through sudo.
 func (s *Services) UnsetDAC() (string, error) {
 	if err := s.runDac("dac", "unset"); err != nil {

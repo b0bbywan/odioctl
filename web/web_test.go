@@ -853,7 +853,23 @@ func TestDacSetRunsPrivilegedAndMarksReboot(t *testing.T) {
 		t.Error("config.txt not updated")
 	}
 	_, body = f.get("/")
-	wants(t, body, "A reboot is required")
+	wants(t, body, "A reboot is required", `<form hx-post="/reboot"`, "Reboot now")
+	// the button asks logind as the user (odios' polkit rule), no sudo
+	_, body = f.post("/reboot", url.Values{}, true)
+	wants(t, body, `<div class="banner ok">Rebooting`)
+	last := f.userCalls[len(f.userCalls)-1]
+	if strings.Join(last, " ") != "systemctl reboot" || len(f.privileged) != 1 {
+		t.Errorf("userCalls = %v, privileged = %v", f.userCalls, f.privileged)
+	}
+	wants(t, f.logs.String(), "reboot requested")
+}
+
+func TestRebootIsNotOfferedWithoutTheFlag(t *testing.T) {
+	f := newFixture(t)
+	_, body := f.get("/")
+	if strings.Contains(body, "/reboot") {
+		t.Error("reboot button without a pending change")
+	}
 }
 
 func TestDacReapplyingTheCurrentSelectionIsANoOp(t *testing.T) {

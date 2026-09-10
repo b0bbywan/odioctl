@@ -106,8 +106,8 @@ type upgradeView struct {
 
 type pageView struct {
 	Version, UIURL, Hostname string
-	Odios                    string       // "" = no badge
-	Banners                  []bannerView // what holds across renders: the reboot warning
+	Odios                    string // "" = no badge
+	Banners                  bannersView
 	Upgrade                  upgradeView
 	Components               componentsView
 	Dac                      dacView
@@ -311,11 +311,15 @@ func noticeViewOf(msg, errText string, modal *ActionResult) noticeView {
 	return view
 }
 
-func bannersOf(d dac.Status) []bannerView {
-	if d.RebootRequired {
-		return []bannerView{{"warn", "A reboot is required to apply the DAC change."}}
-	}
-	return nil
+// bannersView is what holds across renders: the reboot the DAC change
+// waits for, with the button that does it.
+type bannersView struct {
+	RebootRequired bool
+	Token          string
+}
+
+func bannersOf(svc *Services, d dac.Status) bannersView {
+	return bannersView{RebootRequired: d.RebootRequired, Token: svc.Token()}
 }
 
 // RenderNotice is the answer to a POST: the banner for #notice and, out of
@@ -353,7 +357,7 @@ func RenderSections(svc *Services) ([]Section, error) {
 			return nil, err
 		}
 	}
-	if err := add("banners", "banners.html", bannersOf(svc.DacStatus())); err != nil {
+	if err := add("banners", "banners.html", bannersOf(svc, svc.DacStatus())); err != nil {
 		return nil, err
 	}
 	if err := add("upgrade", "upgrade.html", upgradeViewOf(svc, svc.UpgradeReport())); err != nil {
@@ -399,7 +403,7 @@ func RenderPage(svc *Services, host string) (string, error) {
 		Version:    config.AppVersion,
 		UIURL:      uiURL,
 		Hostname:   selfName,
-		Banners:    bannersOf(d),
+		Banners:    bannersOf(svc, d),
 		Upgrade:    upgradeViewOf(svc, svc.UpgradeReport()),
 		Components: componentsViewOf(svc, st, stateErr),
 		Dac:        dacViewOf(svc, d),

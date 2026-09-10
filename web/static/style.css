@@ -149,6 +149,13 @@ section h2 {
   color: var(--gold);
   border-color: rgba(200, 150, 58, 0.3);
 }
+#banners .banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
 /* #notice sits in the sticky header (odio-ui's toast slot): in view at any
    scroll, since nothing re-renders the page. */
 #notice {
