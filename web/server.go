@@ -73,10 +73,10 @@ func (h *handler) static(w http.ResponseWriter, r *http.Request) {
 }
 
 // events is the stream the page connects to on load (sse-connect on the
-// body) and keeps: every section as a named event, at once and then on
-// each change. The wake channel is taken before each render, so a change
-// during it still fires. A comment every 15s keeps idle proxies from
-// dropping the stream.
+// body) and keeps: every section at once (the page may be stale by the
+// time it connects), then only what each change named. Subscribed before
+// the first send, so a change during it is not lost. A comment every 15s
+// keeps idle proxies from dropping the stream.
 func (h *handler) events(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -86,17 +86,17 @@ func (h *handler) events(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
-	wake := h.svc.Wake()
-	h.sendSections(w, flusher)
+	sub := h.svc.Subscribe()
+	defer h.svc.Unsubscribe(sub)
+	h.sendFragments(w, flusher, SectionNames())
 	ping := time.NewTicker(15 * time.Second)
 	defer ping.Stop()
 	for {
 		select {
 		case <-r.Context().Done():
 			return
-		case <-wake:
-			wake = h.svc.Wake()
-			h.sendSections(w, flusher)
+		case <-sub.Wake():
+			h.sendFragments(w, flusher, sub.Take())
 		case <-ping.C:
 			fmt.Fprint(w, ": ping\n\n")
 			flusher.Flush()
@@ -104,14 +104,14 @@ func (h *handler) events(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (h *handler) sendSections(w io.Writer, flusher http.Flusher) {
-	sections, err := RenderSections(h.svc)
+func (h *handler) sendFragments(w io.Writer, flusher http.Flusher, names []string) {
+	fragments, err := RenderFragments(h.svc, names)
 	if err != nil {
 		h.svc.log.Printf("events: %v", err)
 	}
-	for _, s := range sections {
-		fmt.Fprintf(w, "event: %s\n", s.Event)
-		for _, line := range strings.Split(strings.TrimSpace(s.HTML), "\n") {
+	for _, f := range fragments {
+		fmt.Fprintf(w, "event: %s\n", f.Event)
+		for _, line := range strings.Split(strings.TrimSpace(f.HTML), "\n") {
 			fmt.Fprintf(w, "data: %s\n", line)
 		}
 		fmt.Fprint(w, "\n")

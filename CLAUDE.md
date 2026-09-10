@@ -92,20 +92,24 @@ since rewritten in Go.
 - **The web UI is server-rendered HTML over htmx, the way odio-api's is** —
   no JSON API, no script of our own. `web/static/htmx.min.js` and
   `htmx-sse.js` are odio-api's copies (same version, keep them so). The
-  body opens `GET /events` (`sse-connect`) on load and keeps it; the server
-  sends every section as a named event — `banners`, `upgrade`, `components`,
-  `dac`, and `modal-<key>` for each finished action — on connect and on every
-  `Services.changed()`, rendered by the page's own templates
-  (`web.RenderSections`). Each section's root carries `sse-swap="<name>"
-  hx-swap="outerHTML"` and replaces itself; a modal listens to its own id, so
-  only a page showing it takes its end. Forms are `hx-post` with
+  body opens `GET /events` (`sse-connect`) on load and keeps it. The page
+  is the `web.sections` table — `banners`, `upgrade`, `components`, `dac`,
+  each a name, a template `<name>.gohtml` and a view func — rendered in that
+  order by `RenderPage` and sent as named events by the stream: all of them
+  on connect, then only what a change named. Every mutation ends in
+  `Services.changed(names…)`, which marks those names dirty on every
+  `Subscriber` (one per stream): a section's name, or `modal-<key>` for the
+  modal of a finished action. Each section's root carries
+  `sse-swap="<name>" hx-swap="outerHTML"` and replaces itself; a modal
+  listens to its own id, so only a page showing it takes its end. Name what
+  a change touches and nothing more: an unrelated section re-sent resets
+  what the user was doing in it (the DAC select). Forms are `hx-post` with
   `hx-target="#notice"`, nothing else (no script, no page): the answer to
   a POST is the notice alone (`web.RenderNotice`: the ok/err banner, and an
   action's modal out of band into `#modal`), the state follows on the
-  stream — so every mutation ends in `changed()`. `GET /` is the only page
-  render. Never put `hx-target`/`hx-swap` on an ancestor of a
+  stream. `GET /` is the only page render. Never put `hx-target`/`hx-swap` on an ancestor of a
   section: htmx inherits them and the stream's swaps would follow. Markup
-  lives in `web/templates/*.html` (`html/template`: composition via
+  lives in `web/templates/*.gohtml` (`html/template`: composition via
   `{{range}}`/`{{if}}`/`{{template}}` stays in the templates, Go builds view
   models only, escaping is the engine's), styling in `web/static/style.css`
   which hand-mirrors odio-ui's look (go-odio-api: forest zinc palette, lime

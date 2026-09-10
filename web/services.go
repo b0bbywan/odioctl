@@ -113,9 +113,16 @@ type Services struct {
 	// A watcher polls odio-upgrade.service to its end; how the last one ended.
 	watching    bool
 	upgradeNote actionNote
-	// Closed when something the page shows has changed, then replaced: an
-	// /events stream waits on it and takes the next one.
-	wake chan struct{}
+	// Every open /events stream, told which sections a change touched.
+	subs map[*Subscriber]struct{}
+}
+
+// Subscriber is one /events stream: the sections changed since it last
+// sent, and a signal that there are some.
+type Subscriber struct {
+	mu    sync.Mutex
+	dirty map[string]bool
+	wake  chan struct{}
 }
 
 func NewServices(cfg Config, r Runners) *Services {
@@ -139,24 +146,59 @@ func NewServices(cfg Config, r Runners) *Services {
 		log:      log.New(r.Log, "", 0),
 		runs:     map[actionKey]*actionRun{},
 		finished: map[actionKey]*actionRun{},
-		wake:     make(chan struct{}),
+		subs:     map[*Subscriber]struct{}{},
 	}
 }
 
-// Wake is the channel closed on the next change; take it before reading
-// what it guards, and a fresh one once it has fired.
-func (s *Services) Wake() <-chan struct{} {
+// Subscribe registers a stream; Unsubscribe it when it ends.
+func (s *Services) Subscribe() *Subscriber {
+	sub := &Subscriber{dirty: map[string]bool{}, wake: make(chan struct{}, 1)}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.wake
+	s.subs[sub] = struct{}{}
+	return sub
 }
 
-// changed wakes every waiter at once: close, then a new channel for the next.
-func (s *Services) changed() {
+func (s *Services) Unsubscribe(sub *Subscriber) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	close(s.wake)
-	s.wake = make(chan struct{})
+	delete(s.subs, sub)
+}
+
+// changed tells every stream what to send again: sections by name, a
+// finished action's modal by its id.
+func (s *Services) changed(names ...string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for sub := range s.subs {
+		sub.mark(names)
+	}
+}
+
+func (sub *Subscriber) mark(names []string) {
+	sub.mu.Lock()
+	for _, n := range names {
+		sub.dirty[n] = true
+	}
+	sub.mu.Unlock()
+	select {
+	case sub.wake <- struct{}{}:
+	default: // already signalled, Take gets everything
+	}
+}
+
+// Wake fires once something is dirty; Take is what, and clears it.
+func (sub *Subscriber) Wake() <-chan struct{} { return sub.wake }
+
+func (sub *Subscriber) Take() []string {
+	sub.mu.Lock()
+	defer sub.mu.Unlock()
+	names := make([]string, 0, len(sub.dirty))
+	for n := range sub.dirty {
+		names = append(names, n)
+	}
+	clear(sub.dirty)
+	return names
 }
 
 func newToken() string {
@@ -207,7 +249,7 @@ func (s *Services) SetComponent(kind components.Kind, name string, enabled bool)
 		State:  s.cfg.StatePath,
 		Output: s.cfg.ResolvedUpgradesPath(),
 	})
-	s.changed()
+	s.changed("upgrade", "components")
 	label := components.LabelOf(kind, name)
 	switch {
 	case !enabled:
@@ -285,12 +327,12 @@ func (s *Services) RunAction(kind components.Kind, name, id, host string) (strin
 	go func() { // the exit, when it happens: logged, and the open pages told
 		code := run.proc.ExitCode()
 		s.log.Printf("action %s/%s: pid %d exited %d after %s", name, id, run.proc.Pid(), code, run.elapsed())
-		s.changed()
+		s.changed("components", run.id) // the row, and the modal of a page still showing it
 	}()
 
 	if url := run.awaitLink(actionLinkTimeout); url != "" {
 		s.log.Printf("action %s/%s: link after %s: %s", name, id, run.elapsed(), url)
-		s.changed() // the row shows the link while the process lives
+		s.changed("components") // the row shows the link while the process lives
 		return action.Label + ": open the link below to finish.", run.result(), nil
 	}
 	s.log.Printf("action %s/%s: no link after %s, output so far: %q", name, id, run.elapsed(), run.text())
@@ -378,7 +420,7 @@ func (s *Services) StartUpgrade() (string, error) {
 	}
 	s.log.Printf("upgrade: started %s", UpgradeUnit)
 	s.watchUpgrade()
-	s.changed()
+	s.changed("upgrade")
 	return "Upgrade started.", nil
 }
 
@@ -476,7 +518,7 @@ func (s *Services) endUpgrade(u unitState, started time.Time) {
 	s.mu.Lock()
 	s.watching, s.upgradeNote = false, note
 	s.mu.Unlock()
-	s.changed()
+	s.changed("upgrade", "components") // the run installs rows
 }
 
 // UpgradeState is (running, note of the last run). Without a watcher of its
@@ -524,7 +566,7 @@ func (s *Services) SetDAC(id string) (string, error) {
 	if err := s.runDac("dac", "set", id); err != nil {
 		return "", err
 	}
-	s.changed()
+	s.changed("banners", "dac")
 	return "DAC set to " + id + " — reboot required.", nil
 }
 
@@ -543,7 +585,7 @@ func (s *Services) UnsetDAC() (string, error) {
 	if err := s.runDac("dac", "unset"); err != nil {
 		return "", err
 	}
-	s.changed()
+	s.changed("banners", "dac")
 	return "DAC block removed — reboot required.", nil
 }
 

@@ -27,11 +27,8 @@
   </div>
 </header>
 <main class="wrap">
-{{template "banners.html" .Banners}}
-{{template "upgrade.html" .Upgrade}}
-{{template "components.html" .Components}}
-{{template "dac.html" .Dac}}
-</main>
+{{range .Sections}}{{.}}
+{{end}}</main>
 <div id="modal"></div>
 <footer>
   <div class="wrap">
