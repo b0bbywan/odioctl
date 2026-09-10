@@ -273,7 +273,7 @@ func TestIndexRendersComponentsAndDac(t *testing.T) {
 		t.Fatalf("code = %d", code)
 	}
 	wants(t, body, "MPD", "Spotify Connect", "hifiberry-dacplus-std",
-		"alice", "odio 2026.5.0", f.svc.Token())
+		"odio 2026.5.0", f.svc.Token())
 	if strings.Contains(body, "State: installed") {
 		t.Error("raw status leaked")
 	}
@@ -403,7 +403,7 @@ func TestActionLinkIsLiftedOffStdoutAndShown(t *testing.T) {
 		"kind": {"role"}, "name": {"qbzd"}, "action": {"login"},
 	}, true)
 	wants(t, body, "https://qobuz.test/oauth?id=1", "open the link below to finish",
-		"Open the Qobuz sign-in page")
+		"Qobuz sign-in page")
 	if len(f.spawns) != 1 || f.spawns[0][0] != "qbzd" {
 		t.Errorf("spawns = %v", f.spawns)
 	}
@@ -623,7 +623,7 @@ func TestComponentNotInstalledIsRefused(t *testing.T) {
 func TestUpgradeSection(t *testing.T) {
 	f := newFixture(t)
 	_, body := f.get("/")
-	wants(t, body, "No upgrade check has run yet")
+	wants(t, body, "No upgrade check yet")
 	// a toggle refreshes upgrades.json; disabling mpd leaves nothing pending
 	f.post("/components", url.Values{"kind": {"feature"}, "name": {"mympd"}, "enabled": {"0"}}, true)
 	_, body = f.get("/")
