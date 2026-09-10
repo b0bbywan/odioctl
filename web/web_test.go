@@ -35,6 +35,8 @@ type fixture struct {
 	srv        *httptest.Server
 	privileged [][]string
 	userCalls  [][]string
+	userFail   string        // when set, every user run fails with this on stderr
+	userRan    chan []string // one per user run: the reboot lands after the reply
 	spawns     [][]string
 	script     string
 	logs       syncBuf
@@ -61,7 +63,7 @@ func (s *syncBuf) String() string {
 
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
-	f := &fixture{t: t, dir: t.TempDir()}
+	f := &fixture{t: t, dir: t.TempDir(), userRan: make(chan []string, 16)}
 	f.statePath = filepath.Join(f.dir, "state.json")
 	f.writeRoles(map[string]string{"mpd": "1", "common": "1"})
 	f.configPath = filepath.Join(f.dir, "config.txt")
@@ -93,6 +95,10 @@ func newFixture(t *testing.T) *fixture {
 		},
 		User: func(args []string) (RunResult, error) {
 			f.userCalls = append(f.userCalls, args)
+			f.userRan <- args
+			if f.userFail != "" {
+				return RunResult{Code: 1, Stderr: f.userFail}, nil
+			}
 			return RunResult{}, nil
 		},
 		Spawn: func(argv []string) (ActionProcess, error) {
@@ -858,14 +864,41 @@ func TestDacSetRunsPrivilegedAndMarksReboot(t *testing.T) {
 	}
 	_, body = f.get("/")
 	wants(t, body, "A reboot is required", `<form hx-post="/reboot"`, "Reboot now")
-	// the button asks logind as the user (odios' polkit rule), no sudo
+	// the button asks logind as the user (odios' polkit rule), no sudo —
+	// once the notice is out, since the box goes down on the spot
 	_, body = f.post("/reboot", url.Values{}, true)
 	wants(t, body, `<div class="banner ok">Rebooting`)
-	last := f.userCalls[len(f.userCalls)-1]
-	if strings.Join(last, " ") != "systemctl reboot" || len(f.privileged) != 1 {
+	if last := f.waitUser(); strings.Join(last, " ") != "systemctl reboot" || len(f.privileged) != 1 {
 		t.Errorf("userCalls = %v, privileged = %v", f.userCalls, f.privileged)
 	}
 	wants(t, f.logs.String(), "reboot requested")
+}
+
+func TestRebootRefusedShowsOnTheBanners(t *testing.T) {
+	f := newFixture(t)
+	f.userFail = "Interactive authentication required."
+	s := f.openStream()
+	s.until("event: dac") // the connect batch, dac last
+	_, body := f.post("/reboot", url.Values{}, true)
+	wants(t, body, `<div class="banner ok">Rebooting`) // answered before the refusal
+	f.waitUser()
+	got := s.until("event: banners")
+	wants(t, got, "Reboot failed: systemctl reboot failed: Interactive authentication required.")
+	if strings.Contains(got, "event: dac") {
+		t.Error("the refusal re-sent the dac section")
+	}
+}
+
+// waitUser is the next user run, which for a reboot lands after the reply.
+func (f *fixture) waitUser() []string {
+	f.t.Helper()
+	select {
+	case args := <-f.userRan:
+		return args
+	case <-time.After(2 * time.Second):
+		f.t.Fatal("no user run within 2s")
+		return nil
+	}
 }
 
 func TestRebootIsNotOfferedWithoutTheFlag(t *testing.T) {

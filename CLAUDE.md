@@ -40,7 +40,11 @@ since rewritten in Go.
   waits for ("Reboot now" on its banner, `POST /reboot`) is `systemctl
   reboot` as that user: odios' polkit rule (`10-allow-shutdown.rules`) lets
   the target user reboot through logind, no sudo, no D-Bus library — the
-  same grant odio-api's power buttons use. Upgrades are never run by the
+  same grant odio-api's power buttons use. That POST is answered *before*
+  it runs (`handler.reboot`, not `h.form`): the box goes down the moment
+  logind takes the request, the connection with it, so the notice must be
+  on the wire first; a refusal shows on the banners through the stream
+  (`App.RebootError`). Upgrades are never run by the
   web process: "Apply now" does `systemctl --user start --no-block
   odio-upgrade.service` (the unit odio-api drives too) and that token-checked
   POST is the only place the unit is ever started — a render observes. What

@@ -40,11 +40,24 @@ func (a *App) runDac(args ...string) error {
 
 // Reboot is the reboot the DAC change waits for. It asks logind as the
 // target user: odios' polkit rule lets that user reboot, no sudo. The flag
-// under /run goes with the boot.
-func (a *App) Reboot() (string, error) {
-	if err := runChecked(a.run.User, []string{"systemctl", "reboot"}, "systemctl reboot"); err != nil {
-		return "", err
+// under /run goes with the boot. The page has its answer by now, so a
+// refusal is shown on the banners instead.
+func (a *App) Reboot() {
+	err := runChecked(a.run.User, []string{"systemctl", "reboot"}, "systemctl reboot")
+	if err == nil {
+		a.log.Printf("reboot requested")
+		return
 	}
-	a.log.Printf("reboot requested")
-	return "Rebooting — odio will be back soon.", nil
+	a.log.Printf("reboot: %v", err)
+	a.rebootMu.Lock()
+	a.rebootErr = err.Error()
+	a.rebootMu.Unlock()
+	a.changes.Changed("banners")
+}
+
+// RebootError is why the last reboot was refused, "" when it was not.
+func (a *App) RebootError() string {
+	a.rebootMu.Lock()
+	defer a.rebootMu.Unlock()
+	return a.rebootErr
 }

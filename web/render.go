@@ -296,14 +296,15 @@ func noticeViewOf(msg, errText string, modal *ActionResult) noticeView {
 }
 
 // bannersView is what holds across renders: the reboot the DAC change
-// waits for, with the button that does it.
+// waits for, with the button that does it, and the refusal of the last one.
 type bannersView struct {
 	RebootRequired bool
+	RebootError    string
 	Token          string
 }
 
 func bannersOf(app *App, d dac.Status) bannersView {
-	return bannersView{RebootRequired: d.RebootRequired, Token: app.Token()}
+	return bannersView{RebootRequired: d.RebootRequired, RebootError: app.RebootError(), Token: app.Token()}
 }
 
 // RenderNotice is the answer to a POST: the banner for #notice and, out of

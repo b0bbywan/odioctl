@@ -70,10 +70,12 @@ type App struct {
 	token string
 	log   *log.Logger
 
-	stateMu  sync.Mutex // state.json's read-modify-write
-	changes  *Changes
-	actions  *Actions
-	upgrades *Upgrades
+	stateMu   sync.Mutex // state.json's read-modify-write
+	rebootMu  sync.Mutex
+	rebootErr string // the refusal of the last reboot, for the banners
+	changes   *Changes
+	actions   *Actions
+	upgrades  *Upgrades
 }
 
 func NewApp(cfg Config, r Runners) *App {
