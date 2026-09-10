@@ -14,7 +14,6 @@ import (
 const (
 	DefaultPort = 8021
 	OdioUIPort  = 8018 // odio-api's built-in dashboard, where upgrade progress is shown
-	UpgradeUnit = "odio-upgrade.service"
 )
 
 // Config is what `odioctl web` reads and writes, and the ports it speaks to.

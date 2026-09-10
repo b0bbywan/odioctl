@@ -18,6 +18,7 @@ import (
 	"github.com/b0bbywan/odioctl/dac"
 	"github.com/b0bbywan/odioctl/manifest"
 	"github.com/b0bbywan/odioctl/state"
+	"github.com/b0bbywan/odioctl/upgrade"
 )
 
 const configFixture = "dtparam=audio=on\n[all]\nenable_uart=1\n"
@@ -638,17 +639,18 @@ func (f *fixture) makeUpgradePending() {
 	f.post("/components", url.Values{"kind": {"role"}, "name": {"qbzd"}, "enabled": {"1"}}, true)
 }
 
-// fakeUnit stands in for systemd's view of odio-upgrade.service: `show`
-// answers from it in systemd's order (Result and ExecMainStatus before
-// ActiveState, as on a box), `start` flips it to activating. Its invocation
-// link under the units directory lives while it is activating, as
-// systemd's does. Guarded: the watcher polls from its own goroutine.
+// fakeUnit stands in for systemd's view of odio-upgrade.service behind
+// upgrade.Systemctl: `show` answers from it in systemd's order (Result and
+// ExecMainStatus before ActiveState), `start` flips it to activating. Its
+// invocation link under the units directory lives while it is activating,
+// as systemd's does. Guarded: the watcher asks from its own goroutine.
 type fakeUnit struct {
 	mu     sync.Mutex
 	active string // activating, inactive, failed
 	result string
 	code   int
 	link   string
+	calls  []string // every systemctl --user argv, joined
 }
 
 func (u *fakeUnit) set(active, result string, code int) {
@@ -671,42 +673,44 @@ func (u *fakeUnit) exportLink() {
 	}
 }
 
-// useUnit answers the User runner from u; the watcher polls from its own
-// goroutine, so the calls it records are read back under u's lock. The
-// tick behind inotify is pushed far off: only the link's removal may end
-// the watcher within waitWatcherGone's patience.
+// useUnit puts u behind upgrade.Systemctl. The tick behind inotify is
+// pushed far off: only the link's removal may end the watcher within
+// waitWatcherGone's patience; the poll stays quick for the no-directory case.
 func (f *fixture) useUnit(u *fakeUnit) {
 	f.unit = u
 	u.mu.Lock()
-	u.link = filepath.Join(f.svc.cfg.UnitsDir(), "invocation:"+UpgradeUnit)
+	u.link = filepath.Join(f.svc.cfg.UnitsDir(), "invocation:"+upgrade.Unit)
 	u.exportLink()
 	u.mu.Unlock()
-	f.svc.run.User = func(args []string) (RunResult, error) {
+	oldSystemctl := upgrade.Systemctl
+	upgrade.Systemctl = func(args ...string) (string, error) {
 		u.mu.Lock()
 		defer u.mu.Unlock()
-		f.userCalls = append(f.userCalls, args)
-		cmd := strings.Join(args, " ")
-		switch {
-		case strings.Contains(cmd, "show"):
-			return RunResult{Stdout: fmt.Sprintf("Result=%s\nExecMainStatus=%d\nActiveState=%s\n", u.result, u.code, u.active)}, nil
-		case strings.Contains(cmd, "start"):
+		u.calls = append(u.calls, strings.Join(args, " "))
+		switch args[0] {
+		case "show":
+			return fmt.Sprintf("Result=%s\nExecMainStatus=%d\nActiveState=%s\n", u.result, u.code, u.active), nil
+		case "start":
 			u.active = "activating"
 			u.exportLink()
 		}
-		return RunResult{}, nil
+		return "", nil
 	}
-	oldPoll, oldRecheck := upgradePoll, upgradeRecheck
-	upgradePoll, upgradeRecheck = 20*time.Millisecond, time.Hour
-	f.t.Cleanup(func() { upgradePoll, upgradeRecheck = oldPoll, oldRecheck })
+	oldPoll, oldRecheck := upgrade.UnitPoll, upgrade.UnitRecheck
+	upgrade.UnitPoll, upgrade.UnitRecheck = 20*time.Millisecond, time.Hour
+	f.t.Cleanup(func() {
+		upgrade.Systemctl = oldSystemctl
+		upgrade.UnitPoll, upgrade.UnitRecheck = oldPoll, oldRecheck
+	})
 }
 
-// starts is every `systemctl … start` the User runner saw, one string each.
+// starts is every `systemctl --user start …` the unit saw.
 func (f *fixture) starts() (out []string) {
 	f.unit.mu.Lock()
 	defer f.unit.mu.Unlock()
-	for _, call := range f.userCalls {
-		if cmd := strings.Join(call, " "); strings.Contains(cmd, " start ") {
-			out = append(out, cmd)
+	for _, call := range f.unit.calls {
+		if strings.HasPrefix(call, "start ") {
+			out = append(out, call)
 		}
 	}
 	return out
@@ -738,7 +742,7 @@ func TestApplyNowStartsAndWatchesTheUserUnit(t *testing.T) {
 	wants(t, body, "Upgrade started.")
 	_, body = f.get("/")
 	wants(t, body, "Upgrading…", `<button class="primary" type="button" disabled>`)
-	if starts := f.starts(); len(starts) != 1 || starts[0] != "systemctl --user start --no-block odio-upgrade.service" {
+	if starts := f.starts(); len(starts) != 1 || starts[0] != "start --no-block odio-upgrade.service" {
 		t.Errorf("starts = %v", starts)
 	}
 	// a second click is not a second start
