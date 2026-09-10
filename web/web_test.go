@@ -31,7 +31,7 @@ type fixture struct {
 	dir        string
 	statePath  string
 	configPath string
-	svc        *Services
+	app        *App
 	srv        *httptest.Server
 	privileged [][]string
 	userCalls  [][]string
@@ -85,7 +85,7 @@ func newFixture(t *testing.T) *fixture {
 		t.Fatal(err)
 	}
 	cfg := Config{StatePath: f.statePath, ConfigTxt: f.configPath, Home: f.dir, RuntimeDir: filepath.Join(f.dir, "run")}
-	f.svc = NewServices(cfg, Runners{
+	f.app = NewApp(cfg, Runners{
 		// Stand-in for `sudo -n odioctl dac …`: the same code path, in-process.
 		Privileged: func(args []string) (RunResult, error) {
 			f.privileged = append(f.privileged, args)
@@ -101,7 +101,7 @@ func newFixture(t *testing.T) *fixture {
 		},
 		Log: &f.logs,
 	})
-	f.srv = httptest.NewServer(NewHandler(f.svc))
+	f.srv = httptest.NewServer(NewHandler(f.app))
 	t.Cleanup(f.srv.Close)
 	t.Cleanup(f.stopRuns)
 	return f
@@ -129,9 +129,9 @@ func (f *fixture) runDacInProcess(args []string) RunResult {
 
 // waitRunsGone waits for every started process to exit.
 func (f *fixture) waitRunsGone() bool {
-	f.svc.mu.Lock()
-	defer f.svc.mu.Unlock()
-	for _, run := range f.svc.runs {
+	f.app.actions.mu.Lock()
+	defer f.app.actions.mu.Unlock()
+	for _, run := range f.app.actions.runs {
 		if !run.proc.WaitFor(2 * time.Second) {
 			return false
 		}
@@ -141,9 +141,9 @@ func (f *fixture) waitRunsGone() bool {
 
 // stopRuns kills the shell stand-ins still sleeping.
 func (f *fixture) stopRuns() {
-	f.svc.mu.Lock()
-	defer f.svc.mu.Unlock()
-	for _, run := range f.svc.runs {
+	f.app.actions.mu.Lock()
+	defer f.app.actions.mu.Unlock()
+	for _, run := range f.app.actions.runs {
 		run.proc.Stop()
 	}
 }
@@ -177,7 +177,7 @@ func (f *fixture) get(path string) (int, string) {
 func (f *fixture) post(path string, form url.Values, withToken bool) (int, string) {
 	f.t.Helper()
 	if withToken && form.Get("token") == "" {
-		form.Set("token", f.svc.Token())
+		form.Set("token", f.app.Token())
 	}
 	resp, err := http.Post(f.srv.URL+path, "application/x-www-form-urlencoded",
 		strings.NewReader(form.Encode()))
@@ -271,7 +271,7 @@ func TestIndexRendersComponentsAndDac(t *testing.T) {
 		t.Fatalf("code = %d", code)
 	}
 	wants(t, body, "MPD", "Spotify Connect", "hifiberry-dacplus-std",
-		"odio 2026.5.0", f.svc.Token())
+		"odio 2026.5.0", f.app.Token())
 	if strings.Contains(body, "State: installed") {
 		t.Error("raw status leaked")
 	}
@@ -679,7 +679,7 @@ func (u *fakeUnit) exportLink() {
 func (f *fixture) useUnit(u *fakeUnit) {
 	f.unit = u
 	u.mu.Lock()
-	u.link = filepath.Join(f.svc.cfg.UnitsDir(), "invocation:"+upgrade.Unit)
+	u.link = filepath.Join(f.app.upgrades.unitsDir, "invocation:"+upgrade.Unit)
 	u.exportLink()
 	u.mu.Unlock()
 	oldSystemctl := upgrade.Systemctl
@@ -719,9 +719,9 @@ func (f *fixture) starts() (out []string) {
 func (f *fixture) waitWatcherGone() bool {
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		f.svc.mu.Lock()
-		watching := f.svc.watching
-		f.svc.mu.Unlock()
+		f.app.upgrades.mu.Lock()
+		watching := f.app.upgrades.watching
+		f.app.upgrades.mu.Unlock()
 		if !watching {
 			return true
 		}
@@ -815,7 +815,7 @@ func TestUpgradeStartedElsewhereIsWatchedNeverStarted(t *testing.T) {
 func TestWithoutUnitsDirTheUnitIsPolled(t *testing.T) {
 	f := newFixture(t)
 	f.makeUpgradePending()
-	f.svc.cfg.RuntimeDir = filepath.Join(f.dir, "nowhere")
+	f.app.upgrades.unitsDir = filepath.Join(f.dir, "nowhere")
 	unit := &fakeUnit{active: "inactive", result: "success"}
 	f.useUnit(unit)
 	f.post("/upgrade", url.Values{}, true)

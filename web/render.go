@@ -1,6 +1,6 @@
 package web
 
-// The page: view models built from Services, markup in templates/*.gohtml —
+// The page: view models built from the App, markup in templates/*.gohtml —
 // composition ({{range}}, {{if}}, {{template}}) lives in the templates,
 // escaping in html/template. The stylesheet and logo in static/ mirror
 // odio-ui's look (go-odio-api), htmx and its SSE extension are odio-api's
@@ -124,7 +124,7 @@ var statusUI = map[components.Status][2]string{
 	components.Default:   {"Will install on next upgrade", "Skip"},
 }
 
-func rowViewOf(svc *Services, c components.Component, child bool) rowView {
+func rowViewOf(app *App, c components.Component, child bool) rowView {
 	ui := statusUI[c.Status]
 	enable := "1"
 	if c.Enabled() {
@@ -140,7 +140,7 @@ func rowViewOf(svc *Services, c components.Component, child bool) rowView {
 		Description: description,
 		Status:      string(c.Status),
 		Chip:        ui[0],
-		Token:       svc.Token(),
+		Token:       app.Token(),
 		Kind:        string(c.Kind),
 		Name:        c.Name,
 		Enable:      enable,
@@ -153,7 +153,7 @@ func rowViewOf(svc *Services, c components.Component, child bool) rowView {
 		return row
 	}
 	for _, a := range c.Actions {
-		url, note := svc.ActionState(c.Kind, c.Name, a.ID)
+		url, note := app.actions.State(c.Kind, c.Name, a.ID)
 		av := actionView{ID: a.ID, Button: a.Label, Note: note}
 		if url != "" {
 			av.URL, av.LinkLabel, av.LinkNote = url, a.LinkLabel, a.LinkNote
@@ -166,11 +166,11 @@ func rowViewOf(svc *Services, c components.Component, child bool) rowView {
 	return row
 }
 
-func componentsViewOf(svc *Services, st *state.State, stateErr string) componentsView {
+func componentsViewOf(app *App, st *state.State, stateErr string) componentsView {
 	if st == nil {
 		return componentsView{Err: "state.json: " + stateErr}
 	}
-	comps := components.List(*st, svc.AvailableRoles())
+	comps := components.List(*st, app.AvailableRoles())
 	byParent := map[string][]components.Component{}
 	var orphans []components.Component
 	for _, f := range comps {
@@ -189,15 +189,15 @@ func componentsViewOf(svc *Services, st *state.State, stateErr string) component
 		if r.Kind != components.Role || !r.Toggleable {
 			continue
 		}
-		rows := append(rowsByGroup[r.Group], rowViewOf(svc, r, false))
+		rows := append(rowsByGroup[r.Group], rowViewOf(app, r, false))
 		for _, f := range byParent[r.Name] {
-			rows = append(rows, rowViewOf(svc, f, true))
+			rows = append(rows, rowViewOf(app, f, true))
 		}
 		rowsByGroup[r.Group] = rows
 	}
 	last := components.Groups[len(components.Groups)-1]
 	for _, f := range orphans {
-		rowsByGroup[last] = append(rowsByGroup[last], rowViewOf(svc, f, false))
+		rowsByGroup[last] = append(rowsByGroup[last], rowViewOf(app, f, false))
 	}
 	var view componentsView
 	for _, title := range components.Groups {
@@ -208,13 +208,13 @@ func componentsViewOf(svc *Services, st *state.State, stateErr string) component
 	return view
 }
 
-func dacViewOf(svc *Services, d dac.Status) dacView {
+func dacViewOf(app *App, d dac.Status) dacView {
 	if !d.Supported {
 		return dacView{}
 	}
 	view := dacView{
 		Supported: true,
-		Token:     svc.Token(),
+		Token:     app.Token(),
 		Managed:   d.Managed,
 		Options: []dacOptionView{
 			{ID: "", Text: "— not configured —", Disabled: true, Selected: d.Current == ""},
@@ -246,15 +246,15 @@ func dacViewOf(svc *Services, d dac.Status) dacView {
 	return view
 }
 
-func upgradeViewOf(svc *Services, report *upgrade.Report) upgradeView {
-	running, note := svc.UpgradeState(report)
+func upgradeViewOf(app *App, report *upgrade.Report) upgradeView {
+	running, note := app.upgrades.State(report)
 	view := upgradeView{Running: running, Note: note}
 	if report == nil {
 		return view
 	}
 	view.Checked = true
 	view.Available = report.UpgradeAvailable
-	view.Token = svc.Token()
+	view.Token = app.Token()
 	if !report.UpgradeAvailable {
 		view.UpToDate = fmt.Sprintf("Up to date — odio %s (checked %s).",
 			report.Current, report.CheckedAt)
@@ -302,8 +302,8 @@ type bannersView struct {
 	Token          string
 }
 
-func bannersOf(svc *Services, d dac.Status) bannersView {
-	return bannersView{RebootRequired: d.RebootRequired, Token: svc.Token()}
+func bannersOf(app *App, d dac.Status) bannersView {
+	return bannersView{RebootRequired: d.RebootRequired, Token: app.Token()}
 }
 
 // RenderNotice is the answer to a POST: the banner for #notice and, out of
@@ -321,14 +321,14 @@ func RenderNotice(msg, errText string, modal *ActionResult) (string, error) {
 // swaps itself. sections is the page's order.
 type Section struct {
 	Name string
-	view func(svc *Services) any
+	view func(app *App) any
 }
 
 var sections = []Section{
-	{"banners", func(svc *Services) any { return bannersOf(svc, svc.DacStatus()) }},
-	{"upgrade", func(svc *Services) any { return upgradeViewOf(svc, svc.UpgradeReport()) }},
-	{"components", func(svc *Services) any { st, err := stateOf(svc); return componentsViewOf(svc, st, err) }},
-	{"dac", func(svc *Services) any { return dacViewOf(svc, svc.DacStatus()) }},
+	{"banners", func(app *App) any { return bannersOf(app, app.DacStatus()) }},
+	{"upgrade", func(app *App) any { return upgradeViewOf(app, app.UpgradeReport()) }},
+	{"components", func(app *App) any { st, err := stateOf(app); return componentsViewOf(app, st, err) }},
+	{"dac", func(app *App) any { return dacViewOf(app, app.DacStatus()) }},
 }
 
 // SectionNames is every section, what a stream sends first.
@@ -354,7 +354,7 @@ type Fragment struct {
 // RenderFragments is what a change named: sections in the page's order,
 // then the modal of a finished action by its id (only a page showing it
 // listens). A name that is neither is nothing.
-func RenderFragments(svc *Services, names []string) ([]Fragment, error) {
+func RenderFragments(app *App, names []string) ([]Fragment, error) {
 	want := map[string]bool{}
 	for _, n := range names {
 		want[n] = true
@@ -364,13 +364,13 @@ func RenderFragments(svc *Services, names []string) ([]Fragment, error) {
 		if !want[sec.Name] {
 			continue
 		}
-		html, err := render(sec.Name+".gohtml", sec.view(svc))
+		html, err := render(sec.Name+".gohtml", sec.view(app))
 		if err != nil {
 			return nil, err
 		}
 		out = append(out, Fragment{sec.Name, html})
 	}
-	for _, res := range svc.FinishedResults() {
+	for _, res := range app.actions.Finished() {
 		if !want[res.ID] {
 			continue
 		}
@@ -385,17 +385,17 @@ func RenderFragments(svc *Services, names []string) ([]Fragment, error) {
 
 // stateOf is state.json as the Components section takes it: the state, or
 // nil and the message to show instead.
-func stateOf(svc *Services) (*state.State, string) {
-	s, err := svc.ReadState()
+func stateOf(app *App) (*state.State, string) {
+	s, err := app.ReadState()
 	if err != nil {
-		return nil, stateErrorMsg(svc.Config().StatePath, err)
+		return nil, stateErrorMsg(app.Config().StatePath, err)
 	}
 	return &s, ""
 }
 
 // RenderPage is GET /: the sections as they stand, an empty #notice and
 // #modal for the POSTs to fill. host is the Host header the browser used.
-func RenderPage(svc *Services, host string) (string, error) {
+func RenderPage(app *App, host string) (string, error) {
 	// The Host header when the browser gave one (that name reaches the box),
 	// the box's own hostname otherwise — same address for the odio-ui link
 	// and ssh. The logo is that way home: this page is a settings annex of
@@ -412,11 +412,11 @@ func RenderPage(svc *Services, host string) (string, error) {
 		UIURL:    uiURL,
 		Hostname: selfName,
 	}
-	if st, _ := stateOf(svc); st != nil {
+	if st, _ := stateOf(app); st != nil {
 		view.Odios = st.Odios
 	}
 	for _, sec := range sections {
-		html, err := render(sec.Name+".gohtml", sec.view(svc))
+		html, err := render(sec.Name+".gohtml", sec.view(app))
 		if err != nil {
 			return "", err
 		}
