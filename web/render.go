@@ -75,10 +75,8 @@ type groupView struct {
 }
 
 type componentsView struct {
-	Err              string // non-empty → error banner instead of content
-	User, Mode, Note string
-	Groups           []groupView
-	Infra            string
+	Err    string // non-empty → error banner instead of content
+	Groups []groupView
 }
 
 type dacOptionView struct {
@@ -188,14 +186,10 @@ func componentsViewOf(svc *Services, st *state.State, stateErr string) component
 			orphans = append(orphans, f)
 		}
 	}
+	// Infrastructure roles (not toggleable) are not rows: nothing to do with them.
 	rowsByGroup := map[string][]rowView{}
-	var infra []string
 	for _, r := range comps {
-		if r.Kind != components.Role {
-			continue
-		}
-		if !r.Toggleable {
-			infra = append(infra, r.Label)
+		if r.Kind != components.Role || !r.Toggleable {
 			continue
 		}
 		rows := append(rowsByGroup[r.Group], rowViewOf(svc, r, false))
@@ -208,18 +202,11 @@ func componentsViewOf(svc *Services, st *state.State, stateErr string) component
 	for _, f := range orphans {
 		rowsByGroup[last] = append(rowsByGroup[last], rowViewOf(svc, f, false))
 	}
-	view := componentsView{
-		User: st.TargetUser,
-		Mode: st.InstallMode,
-		Note: components.ApplyNote,
-	}
+	var view componentsView
 	for _, title := range components.Groups {
 		if rows := rowsByGroup[title]; len(rows) > 0 {
 			view.Groups = append(view.Groups, groupView{Title: title, Rows: rows})
 		}
-	}
-	if len(infra) > 0 {
-		view.Infra = "Always installed: " + strings.Join(infra, ", ")
 	}
 	return view
 }

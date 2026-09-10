@@ -535,7 +535,7 @@ func (s *Services) Reboot() (string, error) {
 		return "", err
 	}
 	s.log.Printf("reboot requested")
-	return "Rebooting — the box is back in a minute.", nil
+	return "Rebooting — odio is back in a minute.", nil
 }
 
 // UnsetDAC removes the odioctl block from config.txt, through sudo.
