@@ -22,6 +22,8 @@ type actionRun struct {
 	argv      []string
 	started   time.Time
 	scheme    string // the stdout token to surface as a link
+	skip      string // a link containing this is not the one
+	keepLink  bool   // the link outlives the process (components.Action)
 	linkLabel string
 	title     string
 	found     chan struct{} // closed when the link is out (or at EOF)
@@ -52,6 +54,8 @@ func startAction(spawn func([]string) (ActionProcess, error), action components.
 		argv:      argv,
 		started:   time.Now(),
 		scheme:    action.LinkScheme,
+		skip:      action.LinkSkip,
+		keepLink:  action.LinkOutlivesRun,
 		linkLabel: action.LinkLabel,
 		title:     action.Label,
 		found:     make(chan struct{}),
@@ -73,7 +77,7 @@ func (r *actionRun) drain() {
 		line, err := rd.ReadString('\n')
 		if line != "" && r.link() == "" {
 			r.record(line)
-			if url := findLink(line, r.scheme); url != "" {
+			if url := findLink(line, r.scheme, r.skip); url != "" {
 				r.mu.Lock()
 				r.url = url
 				r.mu.Unlock()
@@ -86,11 +90,15 @@ func (r *actionRun) drain() {
 	}
 }
 
-func findLink(line, scheme string) string {
+func findLink(line, scheme, skip string) string {
 	for _, w := range strings.Fields(line) {
-		if strings.HasPrefix(w, scheme) {
-			return w
+		if !strings.HasPrefix(w, scheme) {
+			continue
 		}
+		if skip != "" && strings.Contains(w, skip) {
+			continue
+		}
+		return w
 	}
 	return ""
 }
@@ -130,17 +138,23 @@ func (r *actionRun) text() string {
 	return strings.Join(r.output, "")
 }
 
-// result is the modal: the link while the process lives, Done once it has
-// exited cleanly, the output either way.
+// pending is what the row and the modal show: the link while it can still be
+// followed, otherwise how the run ended.
+func (r *actionRun) pending() (string, actionNote) {
+	if r.alive() {
+		return r.link(), actionNote{}
+	}
+	if url := r.link(); url != "" && r.keepLink && r.proc.ExitCode() == 0 {
+		return url, actionNote{}
+	}
+	return "", r.note()
+}
+
+// result is the modal: the pending link or the end of the run, and the output.
 func (r *actionRun) result() *ActionResult {
 	r.settle()
-	res := &ActionResult{ID: r.id, Title: r.title, Output: r.text(), LinkLabel: r.linkLabel}
-	if r.alive() {
-		res.URL = r.link()
-	} else {
-		res.Note = r.note()
-	}
-	return res
+	url, note := r.pending()
+	return &ActionResult{ID: r.id, Title: r.title, Output: r.text(), URL: url, LinkLabel: r.linkLabel, Note: note}
 }
 
 // actionNote is the outcome of a finished run: success (the row shows a Done

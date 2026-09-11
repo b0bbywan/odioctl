@@ -157,9 +157,6 @@ func rowViewOf(app *App, c components.Component, child bool) rowView {
 		av := actionView{ID: a.ID, Button: a.Label, Note: note}
 		if url != "" {
 			av.URL, av.LinkLabel, av.LinkNote = url, a.LinkLabel, a.LinkNote
-			if av.LinkNote == "" {
-				av.LinkNote = "started"
-			}
 		}
 		row.Actions = append(row.Actions, av)
 	}

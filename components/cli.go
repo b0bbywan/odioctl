@@ -33,8 +33,11 @@ type actionJSON struct {
 	Description string   `json:"description"`
 	Argv        []string `json:"argv"`
 	LinkScheme  string   `json:"link_scheme"`
+	LinkSkip    string   `json:"link_skip"`
 	LinkLabel   string   `json:"link_label"`
 	LinkNote    string   `json:"link_note"`
+	// converted from Action: same fields, same order
+	LinkOutlivesRun bool `json:"link_outlives_run"`
 }
 
 func toJSON(comps []Component) []componentJSON {
