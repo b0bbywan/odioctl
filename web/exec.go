@@ -49,7 +49,7 @@ type execProcess struct {
 }
 
 // defaultSpawn runs a component action as this process's user (the odios
-// target user), no sudo: exactly what the operator would type on the box.
+// target user), no sudo: exactly what the operator would type on odio.
 func defaultSpawn(argv []string) (ActionProcess, error) {
 	r, w, err := os.Pipe()
 	if err != nil {

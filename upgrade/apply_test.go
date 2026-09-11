@@ -371,7 +371,7 @@ func TestRefusesATargetThatIsNotAReleaseTag(t *testing.T) {
 
 func TestMissingReportIsNothingToApply(t *testing.T) {
 	// The release is decided by `check`: with no report there is nothing to
-	// follow, and "latest" is not picked on the box's behalf.
+	// follow, and "latest" is not picked on odio's behalf.
 	d := t.TempDir()
 	writeState(t, d, makeState())
 	noFetch(t)

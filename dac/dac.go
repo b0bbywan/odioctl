@@ -9,12 +9,9 @@
 //	dtoverlay=hifiberry-dacplus-std
 //	# END odioctl dac
 //
-// The [all] resets any open [pi4]-style filter section, and the empty
-// `dtoverlay=` retargets `dtparam=` at the base DTB (see overlayReset).
-// Pre-existing top-level audio lines are commented out with DisabledPrefix so
-// `dac unset` restores them verbatim. Parse/Apply/Unapply are pure; only
-// ReadConfig/WriteConfig touch the disk. Writing needs root — unprivileged
-// callers go through `sudo odioctl dac set <id>`.
+// [all] resets any open [pi4]-style filter section, the empty `dtoverlay=`
+// retargets `dtparam=` at the base DTB, and stray audio lines are commented
+// out with DisabledPrefix so `dac unset` restores them. Writing needs root.
 package dac
 
 import (

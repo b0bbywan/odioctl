@@ -1,7 +1,6 @@
-// Package components models odios roles (services) and features (plugins of
-// a role), toggled through state.json; nothing is installed or removed until
-// `odioctl upgrade apply` runs. The catalog is advisory: any name present in
-// state.json is accepted even if unknown here.
+// Package components models odios roles (services) and features (plugins of a
+// role), toggled through state.json; nothing is installed until `odioctl
+// upgrade apply` runs. The catalog is advisory: unknown names are accepted.
 package components
 
 import (
@@ -312,9 +311,8 @@ func featureStatus(st state.State, name string) Status {
 }
 
 // List returns roles in catalog order (grouped), unknown roles last, then
-// features. shipped is the target release's role set (keys only, nil =
-// unknown): roles it lacks are dropped, names state.json carries are kept
-// anyway, features follow their parent out.
+// features. shipped is the target release's role set (nil = unknown): roles it
+// lacks are dropped unless state.json names them, features follow their parent.
 func List(st state.State, shipped map[string]string) []Component {
 	roles := map[string]bool{}
 	for _, e := range roleCatalog {
@@ -425,10 +423,9 @@ func known(st state.State, kind Kind, name string) bool {
 	return inCatalog || stateHasFeature(st, name)
 }
 
-// Set returns a copy of st with name opted in or out. Disabling a role moves
-// it from Roles into RolesExcluded; enabling only clears the exclusion,
-// except an opt-in role, recorded in Roles with RequestedVersion (install.sh
-// would otherwise answer its [y/N] with N).
+// Set returns a copy of st with name opted in or out. Disabling moves a role
+// into RolesExcluded; enabling clears the exclusion, and records an opt-in
+// role with RequestedVersion (install.sh would answer its [y/N] with N).
 func Set(st state.State, kind Kind, name string, enabled bool) (state.State, error) {
 	if kind != Role && kind != Feature {
 		return state.State{}, errorf("unknown component kind %q", kind)
@@ -531,10 +528,8 @@ func LabelOf(kind Kind, name string) string {
 	return name
 }
 
-// Pending lists what the next `upgrade apply` would install, as
-// ["role:mpd", "feature:mympd", …] in catalog order: Default roles the
-// release ships (shipped nil = the catalog) plus Default features whose
-// parent is installed or pending. Disabling is never pending.
+// Pending lists what the next `upgrade apply` would install, as ["role:mpd",
+// "feature:mympd", …] in catalog order. Disabling is never pending.
 func Pending(st state.State, shipped map[string]string) []string {
 	ships := func(name string) bool {
 		if shipped == nil {

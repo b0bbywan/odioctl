@@ -678,10 +678,8 @@ func (f *fixture) makeUpgradePending() {
 }
 
 // fakeUnit stands in for systemd's view of odio-upgrade.service behind
-// upgrade.Systemctl: `show` answers from it in systemd's order (Result and
-// ExecMainStatus before ActiveState), `start` flips it to activating. Its
-// invocation link under the units directory lives while it is activating,
-// as systemd's does. Guarded: the watcher asks from its own goroutine.
+// upgrade.Systemctl, invocation link included, in systemd's property order.
+// Guarded: the watcher asks from its own goroutine.
 type fakeUnit struct {
 	mu     sync.Mutex
 	active string // activating, inactive, failed

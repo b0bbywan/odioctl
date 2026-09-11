@@ -106,7 +106,7 @@ jobs:
       apt_repo_token: ${{ secrets.APT_REPO_TOKEN }}
 
   # odio-ci's release only attaches the .debs; append the bare binaries to the
-  # same release — install.sh-less consumers (a dev box, a container) curl one.
+  # same release — install.sh-less consumers (a dev machine, a container) curl one.
   release-binaries:
     needs: [release]
     if: startsWith(github.ref, 'refs/tags/v')

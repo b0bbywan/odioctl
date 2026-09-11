@@ -357,7 +357,7 @@ func TestQbzdLoginTakesTheCallbackHost(t *testing.T) {
 	if !ok {
 		t.Fatal("qbzd login not in catalog")
 	}
-	// --callback-host is what sends the OAuth redirect back to this box
+	// --callback-host is what sends the OAuth redirect back to odio
 	got := fillArgv(login.Argv, "host", "odio.local")
 	if !slices.Equal(got, []string{"qbzd", "login", "--callback-host", "odio.local"}) {
 		t.Errorf("argv = %v", got)
@@ -377,7 +377,7 @@ func TestCatalogMarksQbzdOptIn(t *testing.T) {
 }
 
 func TestOptInAbsentFromBothListsReadsAsOff(t *testing.T) {
-	// A box installed before qbzd existed has it in neither list. install.sh
+	// An odio installed before qbzd existed has it in neither list. install.sh
 	// would answer N, so the row must not promise an install (nor go pending).
 	st := makeState()
 	st.Roles = map[string]string{"mpd": "1"}

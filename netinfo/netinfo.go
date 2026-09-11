@@ -1,4 +1,4 @@
-// Package netinfo answers "how does the LAN reach this box": the source IP
+// Package netinfo answers "how does the LAN reach odio": the source IP
 // of the default route, and the PWA deep link built from it.
 package netinfo
 

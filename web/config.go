@@ -1,7 +1,6 @@
-// Package web serves the odioctl settings UI: server-rendered HTML over
-// htmx, every section following the box on /events — no JSON API. Runs as
-// the odios target user; only config.txt writes escalate, through `sudo -n
-// odioctl dac …`.
+// Package web serves the odioctl settings UI: server-rendered HTML over htmx,
+// every section following odio on /events. Runs as the odios target user;
+// only config.txt writes escalate, through `sudo -n odioctl dac …`.
 package web
 
 import (

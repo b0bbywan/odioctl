@@ -1,9 +1,7 @@
 package web
 
-// The upgrade card's side of odio-upgrade.service: one watcher at a time
-// (upgrade.WaitUnit), and how the last run ended as the card shows it.
-// Only Start ever starts the unit, from the token-checked POST: a render
-// observes.
+// The upgrade card's side of odio-upgrade.service: one watcher at a time, and
+// how the last run ended. Only Start ever starts the unit; a render observes.
 
 import (
 	"fmt"
@@ -83,10 +81,9 @@ func (u *Upgrades) watch() {
 	}()
 }
 
-// State is (running, note of the last run). Without a watcher of its own,
-// and while the report says there is something to apply, it asks systemd:
-// a unit activating was started by odio-api or before this process and
-// gets watched from here; one failed is shown as such.
+// State is (running, note of the last run). With no watcher of its own it
+// asks systemd: a unit activating (odio-api's, or ours from before a restart)
+// gets watched from here, one failed is shown as such.
 func (u *Upgrades) State(report *upgrade.Report) (running bool, note actionNote) {
 	u.mu.Lock()
 	watching, note := u.watching, u.note

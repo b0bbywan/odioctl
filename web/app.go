@@ -1,13 +1,8 @@
 package web
 
-// What the handlers hold: the config, the form token, the log, the
-// subprocess seams, and the three things that live between requests — the
-// open streams (Changes), the component actions (Actions) and the upgrade
-// watcher (Upgrades), each with its own lock. Reads go straight to the
-// domain packages; each write sits in the file of its section
-// (components.go, dac.go, actions.go, upgrades.go) and ends in
-// changes.Changed. Subprocesses go through Runners so tests drive the real
-// code path against stand-ins.
+// What the handlers hold: config, form token, log, the subprocess seams, and
+// the three things that live between requests (Changes, Actions, Upgrades),
+// each with its own lock. Every write ends in changes.Changed.
 
 import (
 	"crypto/rand"

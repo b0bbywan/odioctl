@@ -68,10 +68,8 @@ func DeriveInstallEnv(st state.State) map[string]string {
 	return env
 }
 
-// DeriveRunEnv emits RUN_X=N for roles whose target version matches
-// installed. Asymmetric: anything else falls through to install.sh's
-// RUN_X=${RUN_X:-$INSTALL_X} default — RUN_X stays an internal optimisation
-// channel, INSTALL_X the user-facing API.
+// DeriveRunEnv emits RUN_X=N for roles already at the target version, and
+// nothing otherwise: RUN_X is an internal optimisation, INSTALL_X the API.
 func DeriveRunEnv(st state.State, man *manifest.Manifest, installEnv map[string]string) map[string]string {
 	env := map[string]string{}
 	if man == nil {
@@ -194,11 +192,9 @@ func RunApply(stdout, stderr io.Writer, opts ApplyOptions) int {
 		return 2
 	}
 
-	// The report `check` wrote next to this state.json, read once: it is the
-	// gate, the target tag and the manifest snapshot, and every web toggle
-	// rewrites it underneath us. None (never checked, or not ours) is
-	// "nothing to apply": the release is decided by `check`, so it takes
-	// --force or --version to run without one — then "latest" is a choice.
+	// The report `check` wrote next to this state.json, read once: the gate,
+	// the target tag and the manifest. No report is "nothing to apply" — the
+	// release is decided by `check`, only --force/--version run without one.
 	upgradesPath := state.UpgradesPathFor(statePath)
 	report := ReadReport(upgradesPath)
 	if !opts.Force && !opts.Reinstall && opts.Version == "" &&

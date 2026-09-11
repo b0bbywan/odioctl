@@ -35,7 +35,7 @@ A single static Go binary (stdlib plus fsnotify), packaged as per-arch `.deb`s o
 ## Install
 
 ```bash
-# odios installs and wires it for you. By hand, on a box with the odio apt repo:
+# odios installs and wires it for you. By hand, on a system with the odio apt repo:
 sudo apt install odioctl
 ```
 
@@ -84,7 +84,7 @@ is nothing to apply, unless `--force` or `--version` says otherwise. A custom
 Only the current state.json schema is accepted — pre-2026.5 installs are not
 supported.
 
-**Targeting a pre-release.** A box installed from a PR build runs a release the
+**Targeting a pre-release.** An odio installed from a PR build runs a release the
 published manifest knows nothing about, so every role only that build ships
 reads as "not in this release" and never goes pending. `check --version pr-84`,
 or `ODIOCTL_ODIOS_VERSION=pr-84` in `/etc/default/odioctl` (read by the daily
@@ -136,9 +136,9 @@ dashboard), no JSON API: a components table with Enable/Disable buttons,
 and a DAC picker (select + Apply, Reset to drop the odioctl block, then a
 Reboot button on the banner the change leaves). Actions are
 `POST /components`, `POST /dac`, `POST /dac/unset`, `POST /reboot`; the page answers with
-a message or error banner and every section follows the box live over
+a message or error banner and every section follows odio live over
 `GET /events`. Every form carries a per-process token, so a cross-site page
-cannot drive the box. There
+cannot drive odio. There
 is no authentication (same LAN trust model as odio-api); use `--bind 127.0.0.1`
 to keep it local. Runs as the odios target user; state.json is edited
 directly (needs `/var/lib/odio` group-writable by `odio`, see below),

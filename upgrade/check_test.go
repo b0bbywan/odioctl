@@ -189,7 +189,7 @@ func TestEnvSelectsTheReleaseForTheDailyCheck(t *testing.T) {
 }
 
 func TestRefreshKeepsTheReleaseItCached(t *testing.T) {
-	// Losing the pin (or the network) must not silently move the box back
+	// Losing the pin (or the network) must not silently move odio back
 	// onto the published latest: the cached manifest and its tag go together.
 	d := t.TempDir()
 	st := makeState()
