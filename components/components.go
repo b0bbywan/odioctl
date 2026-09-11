@@ -28,17 +28,20 @@ const (
 	Default   Status = "default"
 )
 
-// Action is a one-off command the box runs for the user. Argv is fixed here,
+// Action is a one-off command odio runs for the user. Argv is fixed here,
 // never built from the request; the server only fills in {host} (the address
-// the browser reached the box by) and {home} (the target user's home).
+// the browser reached odio by) and {home} (the target user's home).
 type Action struct {
 	ID          string // form value, unique per component
 	Label       string // button text
 	Description string // one line: what the command does
 	Argv        []string
 	LinkScheme  string // the stdout token to surface as a link
+	LinkSkip    string // a link containing this is not the one
 	LinkLabel   string // anchor text for that token
-	LinkNote    string // how long the operator has to follow it
+	LinkNote    string // what to know about the link
+	// the command prints the link and exits: the link stays on the row
+	LinkOutlivesRun bool
 }
 
 type RoleInfo struct {
@@ -196,6 +199,19 @@ var featureCatalog = []catalogFeature{
 		Description: "Qobuz streaming",
 		Package:     "upmpdcli-qobuz",
 		Parent:      "upmpdcli",
+		Actions: []Action{{
+			ID:          "login",
+			Label:       "Log in to Qobuz",
+			Description: "Sign in to Qobuz",
+			Argv: []string{
+				"python3", "-u",
+				"/usr/share/upmpdcli/cdplugins/qobuz/qobuz-init-oauth.py",
+			},
+			LinkScheme:      "https://",
+			LinkSkip:        "localhost", // it prints that one for a local browser
+			LinkLabel:       "Qobuz sign-in page",
+			LinkOutlivesRun: true, // upmpdcli answers the redirect, not the script
+		}},
 	}},
 	{"upnpwebradios", FeatureInfo{
 		Label:       "Web radios",

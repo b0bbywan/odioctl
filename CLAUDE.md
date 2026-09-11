@@ -41,7 +41,7 @@ since rewritten in Go.
   reboot` as that user: odios' polkit rule (`10-allow-shutdown.rules`) lets
   the target user reboot through logind, no sudo, no D-Bus library — the
   same grant odio-api's power buttons use. That POST is answered *before*
-  it runs (`handler.reboot`, not `h.form`): the box goes down the moment
+  it runs (`handler.reboot`, not `h.form`): odio goes down the moment
   logind takes the request, the connection with it, so the notice must be
   on the wire first; a refusal shows on the banners through the stream
   (`App.RebootError`). Upgrades are never run by the
@@ -79,12 +79,12 @@ since rewritten in Go.
   lights up and `apply` does not refuse. Disabling is never pending.
   The `Report` struct's field order and json tags are the wire format.
 - **The target release is decided in one place: `check`.** `apply` never picks
-  a release of its own on the box (`odio-upgrade.service` is a frozen sudoers
+  a release of its own on odio (`odio-upgrade.service` is a frozen sudoers
   argv, no `--version`), it follows upgrades.json — read once through
   `upgrade.ReadReport`, the only decoder of that file, and no report means
   nothing to apply (only `--force`/`--version` run without one). Where that
   file lives is `state.UpgradesPathFor(statePath)` for `check`, `apply` and
-  `web` alike, so a custom `--state` never splits them. A test box is steered by
+  `web` alike, so a custom `--state` never splits them. A test odio is steered by
   pointing `check` at a pre-release — `--version pr-84` or
   `ODIOCTL_ODIOS_VERSION` (`/etc/default/odioctl`, wired into both `--user`
   units: the web process refreshes upgrades.json on every toggle). Never add a
@@ -119,11 +119,11 @@ since rewritten in Go.
   `{{range}}`/`{{if}}`/`{{template}}` stays in the templates, Go builds view
   models only, escaping is the engine's), styling in `web/static/style.css`
   which hand-mirrors odio-ui's look (go-odio-api: forest zinc palette, lime
-  accent) so both pages on the box feel like one product — keep it in sync,
+  accent) so both pages on odio feel like one product — keep it in sync,
   no Tailwind. No redirects, no query-string state.
-- **`components.Action` = a command the box runs for the user**, so nobody
+- **`components.Action` = a command odio runs for the user**, so nobody
   needs a shell on it. `Argv` lives in the catalog and is never built from the
-  request — only `{host}` (the name the browser reached the box by, so an
+  request — only `{host}` (the name the browser reached odio by, so an
   OAuth callback lands here) and `{home}` (the target user's home: argv runs
   without a shell, so a `~` would stay literal) are substituted. The web
   process runs it as the target user (no sudo) and does *not* wait for it:
@@ -137,7 +137,10 @@ since rewritten in Go.
   Qobuz URL, then holds a one-shot listener for 300s waiting for the browser
   to come back to `{host}`. Tidal's runs upmpdcli's own `get_credentials.py`,
   whose link is followed on any device — no callback, hence `{home}` for the
-  credentials path and no `{host}`.
+  credentials path and no `{host}`. upmpdcli's `qobuz-init-oauth.py` prints
+  the sign-in page twice (`LinkSkip` drops the localhost one) and exits,
+  upmpdcli's port 49149 taking the redirect — hence `LinkOutlivesRun`: the
+  link stays on the row, a Done badge would claim a login nobody has done.
 
 ## Dev loop
 

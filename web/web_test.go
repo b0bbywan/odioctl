@@ -495,7 +495,7 @@ func TestActionHostReachesTheArgv(t *testing.T) {
 		"kind": {"role"}, "name": {"qbzd"}, "action": {"login"},
 	}, true)
 	argv := f.spawns[0]
-	// --callback-host is the name the browser reached the box by
+	// --callback-host is the name the browser reached odio by
 	if argv[2] != "--callback-host" || !strings.HasPrefix(argv[3], "127.0.0.1") {
 		t.Errorf("argv = %v", argv)
 	}
@@ -512,14 +512,14 @@ func TestActionHomeReachesTheArgvOrIsRefused(t *testing.T) {
 	}
 	action := components.Action{Label: "Log in to Tidal", Argv: []string{"helper", "-f", "{home}/.cache/creds"}}
 
-	run, err := startAction(spawn, action, "box.local", "/home/alice")
+	run, err := startAction(spawn, action, "odio.local", "/home/alice")
 	if err != nil || argv[2] != "/home/alice/.cache/creds" {
 		t.Errorf("argv = %v, err = %v", argv, err)
 	}
 	run.proc.Stop()
 
 	argv = nil
-	if _, err := startAction(spawn, action, "box.local", ""); err == nil || argv != nil {
+	if _, err := startAction(spawn, action, "odio.local", ""); err == nil || argv != nil {
 		t.Errorf("spawned %v, err = %v; want a refusal", argv, err)
 	}
 }
@@ -563,6 +563,38 @@ func TestFinishedRunBecomesANoteOnTheNextRender(t *testing.T) {
 		"action qbzd/login: link after ",
 		"https://qobuz.test/oauth?id=1",
 		"exited 0 after ")
+}
+
+// The upmpdcli Qobuz helper prints the sign-in page twice (localhost, then
+// the LAN address) and exits, leaving the redirect to upmpdcli.
+func TestSkippedLinkAndALinkThatOutlivesItsRun(t *testing.T) {
+	const want = "https://qobuz.test/oauth?redirect_url=http://192.168.1.95:49149/qobuz/oauth/"
+	script := "echo 'same machine as the browser:'; " +
+		"echo 'https://qobuz.test/oauth?redirect_url=http://localhost:49149/qobuz/oauth/'; " +
+		"echo 'a different machine:'; echo '" + want + "'"
+	spawn := func([]string) (ActionProcess, error) { return defaultSpawn([]string{"sh", "-c", script}) }
+	action := components.Action{
+		Label: "Log in to Qobuz", Argv: []string{"helper"},
+		LinkScheme: "https://", LinkSkip: "localhost", LinkOutlivesRun: true,
+	}
+	run, err := startAction(spawn, action, "odio.local", "/home/alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := run.awaitLink(2 * time.Second); got != want {
+		t.Errorf("link = %q", got)
+	}
+	if !run.proc.WaitFor(2 * time.Second) {
+		t.Fatal("still running")
+	}
+	if url, note := run.pending(); url != want || note.Text != "" {
+		t.Errorf("pending = %q, %+v; want the link to survive the exit", url, note)
+	}
+	// without the trait, the same exit is a Done badge and the link is gone
+	run.keepLink = false
+	if url, note := run.pending(); url != "" || !note.OK() {
+		t.Errorf("pending = %q, %+v", url, note)
+	}
 }
 
 func TestFailureShowsTheOutputInTheModal(t *testing.T) {
@@ -865,7 +897,7 @@ func TestDacSetRunsPrivilegedAndMarksReboot(t *testing.T) {
 	_, body = f.get("/")
 	wants(t, body, "A reboot is required", `<form hx-post="/reboot"`, "Reboot now")
 	// the button asks logind as the user (odios' polkit rule), no sudo —
-	// once the notice is out, since the box goes down on the spot
+	// once the notice is out, since odio goes down on the spot
 	_, body = f.post("/reboot", url.Values{}, true)
 	wants(t, body, `<div class="banner ok">Rebooting`)
 	if last := f.waitUser(); strings.Join(last, " ") != "systemctl reboot" || len(f.privileged) != 1 {

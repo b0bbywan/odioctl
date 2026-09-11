@@ -140,17 +140,17 @@ func (x *Actions) run(action components.Action, key actionKey, host string) (str
 }
 
 // State is the (pending link, note) of one action — ("", "") when it never
-// ran. Reaps a finished run into the note the next render shows.
+// ran. Reaps a finished run into what the next render shows of it.
 func (x *Actions) State(kind components.Kind, name, id string) (url string, note actionNote) {
 	key := actionKey{kind, name, id}
 	x.mu.Lock()
 	defer x.mu.Unlock()
 	x.reapLocked()
 	if run, ok := x.runs[key]; ok {
-		return run.link(), actionNote{}
+		return run.pending()
 	}
 	if done := x.finished[key]; done != nil {
-		return "", done.note()
+		return done.pending()
 	}
 	return "", actionNote{}
 }
