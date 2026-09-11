@@ -51,7 +51,8 @@ since rewritten in Go.
   the card shows comes from systemd, not from a held child. The unit is the
   `upgrade` package's (`upgrade/unit.go`): `StartUnit`, `ShowUnit` (by key:
   `show` prints properties in systemd's order, never the `-p` one) and
-  `WaitUnit`, which waits on `$XDG_RUNTIME_DIR/systemd/units` (fsnotify,
+  `WatchUnit`/`WaitUnit` (subscribed before returning, so a waiter cannot
+  miss the end), which watches `$XDG_RUNTIME_DIR/systemd/units` (fsnotify,
   `Config.RuntimeDir`) for the `invocation:odio-upgrade.service` link
   systemd removes as the oneshot leaves `activating`, then asks `show` how
   it ended; a slow tick backs the events, and without the directory the

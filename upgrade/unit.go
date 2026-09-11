@@ -84,32 +84,37 @@ func ShowUnit() (UnitState, error) {
 	return u, nil
 }
 
-// WaitUnit blocks until the unit is over and returns how: the word comes from
-// its invocation link leaving unitsDir, a slow tick behind it, and polling
-// without that directory. No probe up front — StartUnit returns too early.
+// WaitUnit blocks until the unit is over and returns how.
 func WaitUnit(unitsDir string, logf func(string, ...any)) UnitState {
+	return WatchUnit(unitsDir, logf)()
+}
+
+// WatchUnit subscribes to the invocation link leaving unitsDir (tick, or poll,
+// behind it) before returning: a goroutine waiting later would miss the end.
+func WatchUnit(unitsDir string, logf func(string, ...any)) func() UnitState {
 	interval := UnitRecheck
 	gone, stop, err := removedFrom(unitsDir, "invocation:"+Unit, logf)
 	if err != nil {
 		logf("upgrade: cannot watch %s (%v), polling %s", unitsDir, err, Unit)
-		interval = UnitPoll // gone is nil: never fires
-	} else {
-		defer stop()
+		interval, stop = UnitPoll, func() {} // gone is nil: never fires
 	}
-	tick := time.NewTicker(interval)
-	defer tick.Stop()
-	for {
-		select {
-		case <-gone:
-		case <-tick.C:
-		}
-		u, err := ShowUnit()
-		if err != nil {
-			logf("upgrade: %v", err)
-			continue
-		}
-		if !u.Running() {
-			return u
+	return func() UnitState {
+		defer stop()
+		tick := time.NewTicker(interval)
+		defer tick.Stop()
+		for {
+			select {
+			case <-gone:
+			case <-tick.C:
+			}
+			u, err := ShowUnit()
+			if err != nil {
+				logf("upgrade: %v", err)
+				continue
+			}
+			if !u.Running() {
+				return u
+			}
 		}
 	}
 }
