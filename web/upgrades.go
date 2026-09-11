@@ -70,8 +70,9 @@ func (u *Upgrades) watch() {
 	u.watching = true
 	u.note = actionNote{}
 	started := time.Now()
+	wait := upgrade.WatchUnit(u.unitsDir, u.log.Printf) // subscribed before we let go
 	go func() {
-		s := upgrade.WaitUnit(u.unitsDir, u.log.Printf)
+		s := wait()
 		note := unitNote(s)
 		u.log.Printf("upgrade: %s %s after %s (%s)", upgrade.Unit, s.Active, time.Since(started).Round(time.Second), note.Text)
 		u.mu.Lock()

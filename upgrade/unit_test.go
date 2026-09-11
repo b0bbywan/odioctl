@@ -95,9 +95,9 @@ func TestWaitUnitEndsWhenTheInvocationLinkGoes(t *testing.T) {
 	UnitPoll, UnitRecheck = time.Hour, time.Hour // only the link's removal may end it
 	t.Cleanup(func() { UnitPoll, UnitRecheck = oldPoll, oldRecheck })
 
+	wait := WatchUnit(dir, quiet) // subscribed here, so the removal cannot be missed
 	done := make(chan UnitState, 1)
-	go func() { done <- WaitUnit(dir, quiet) }()
-	time.Sleep(50 * time.Millisecond)
+	go func() { done <- wait() }()
 	f.set("inactive", "success", 0)
 	_ = os.Remove(link)
 	select {
