@@ -7,11 +7,9 @@ func (a *App) SetDAC(id string) (string, error) {
 	if _, ok := dac.ByID(id); !ok {
 		return "", userErrorf("unknown DAC id %q", id)
 	}
-	// Plain HTML cannot grey the Apply button out, so re-applying the current
-	// selection is one click away: recognise the no-op here rather than
-	// escalate through sudo and claim a reboot that nothing needs. Only when
-	// odioctl owns the block, though — same id over an unmanaged config.txt
-	// does change the file (takes ownership, comments the stray lines out).
+	// Re-applying the current selection is one click away, so catch the no-op
+	// rather than claim a reboot nothing needs — but only over a block we
+	// already own: the same id takes ownership of an unmanaged config.txt.
 	if d := a.DacStatus(); d.Managed && d.Current == id {
 		return "DAC already set to " + id + " — nothing to apply.", nil
 	}
@@ -38,10 +36,9 @@ func (a *App) runDac(args ...string) error {
 	return runChecked(a.run.Privileged, args, "odioctl dac")
 }
 
-// Reboot is the reboot the DAC change waits for. It asks logind as the
-// target user: odios' polkit rule lets that user reboot, no sudo. The flag
-// under /run goes with the boot. The page has its answer by now, so a
-// refusal is shown on the banners instead.
+// Reboot is the reboot the DAC change waits for: logind as the target user
+// (odios' polkit rule, no sudo), the flag under /run going with the boot.
+// The page already has its answer, so a refusal shows on the banners.
 func (a *App) Reboot() {
 	err := runChecked(a.run.User, []string{"systemctl", "reboot"}, "systemctl reboot")
 	if err == nil {

@@ -62,7 +62,7 @@ func IsDowngrade(target, stateOdios string) bool {
 
 // RoleUpToDate reports whether the installed role version covers target AND is
 // trustworthy: a target ahead of stateOdios is past the last release certified
-// on this box, so the marker for `installed` cannot be trusted — re-run.
+// on this odio, so the marker for `installed` cannot be trusted — re-run.
 func RoleUpToDate(installed, target, stateOdios string) bool {
 	if installed == "" || target == "" {
 		return false

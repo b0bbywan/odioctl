@@ -7,7 +7,7 @@ import (
 )
 
 func TestDefaultRouteIPIsEmptyOrValid(t *testing.T) {
-	// Environment-dependent: a box with no default route legitimately gets "".
+	// Environment-dependent: a machine with no default route legitimately gets "".
 	if ip := DefaultRouteIP(); ip != "" && net.ParseIP(ip) == nil {
 		t.Errorf("DefaultRouteIP() = %q, not an IP", ip)
 	}

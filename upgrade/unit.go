@@ -1,9 +1,8 @@
 package upgrade
 
-// odio-upgrade.service, the unit that applies an upgrade on odio: `sudo
-// odioctl upgrade apply --progress` under the target user's manager. The
-// web UI and odio-api start it; whoever wants to know how it went follows
-// it to its end here.
+// odio-upgrade.service, the unit that applies an upgrade on odio (`sudo
+// odioctl upgrade apply --progress`). The web UI and odio-api start it;
+// following it to its end is here.
 
 import (
 	"bytes"
@@ -85,12 +84,9 @@ func ShowUnit() (UnitState, error) {
 	return u, nil
 }
 
-// WaitUnit blocks until the unit is over and returns how. The word comes
-// from its invocation link leaving unitsDir ($XDG_RUNTIME_DIR/systemd/units,
-// where systemd keeps invocation:<unit> while a unit runs and removes it as
-// it leaves activating), with a slow tick behind; without the directory the
-// unit is polled. No probe up front: StartUnit returns before the unit is
-// activating.
+// WaitUnit blocks until the unit is over and returns how: the word comes from
+// its invocation link leaving unitsDir, a slow tick behind it, and polling
+// without that directory. No probe up front — StartUnit returns too early.
 func WaitUnit(unitsDir string, logf func(string, ...any)) UnitState {
 	interval := UnitRecheck
 	gone, stop, err := removedFrom(unitsDir, "invocation:"+Unit, logf)

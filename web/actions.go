@@ -87,9 +87,8 @@ func (a *App) RunAction(kind components.Kind, name, id, host string) (string, *A
 }
 
 // run starts the action and returns (banner, modal). The command is never
-// waited on: `qbzd login` prints its URL and then holds a listener open
-// until the browser comes back (300s), so stdout is read only until the
-// link shows up and the process is left to it.
+// waited on — `qbzd login` holds its listener for 300s — so stdout is read
+// only until the link shows up.
 func (x *Actions) run(action components.Action, key actionKey, host string) (string, *ActionResult, error) {
 	name, id := key.name, key.id
 	x.mu.Lock()
@@ -121,11 +120,9 @@ func (x *Actions) run(action components.Action, key actionKey, host string) (str
 	}
 	x.log.Printf("action %s/%s: no link after %s, output so far: %q", name, id, run.elapsed(), run.text())
 
-	// No link: either it died (reap it for the exit code — stdout can close a
-	// moment before the process does) or it is stuck and we stop it. The
-	// entry stays in runs meanwhile: it is what keeps a second click from
-	// spawning again while this one is still being stopped, and what State
-	// turns into the row's "Failed (exit N)" note on reload.
+	// No link: either it died (reap it for the exit code) or it is stuck and
+	// we stop it. It stays in runs meanwhile, which is what keeps a second
+	// click from spawning again while this one is being stopped.
 	if !run.proc.WaitFor(2 * time.Second) {
 		run.proc.Stop()
 		return "", nil, &UserError{

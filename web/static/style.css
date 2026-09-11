@@ -1,5 +1,5 @@
-/* odioctl web — hand-written CSS mirroring odio-ui (go-odio-api) so both pages on the
-   box look like one product: forest-tinted zinc palette, lime accent, rounded cards.
+/* odioctl web — hand-written CSS mirroring odio-ui (go-odio-api) so both pages on
+   odio look like one product: forest-tinted zinc palette, lime accent, rounded cards.
    Keep in sync with go-odio-api/tailwind.config.js + ui/styles/input.css. */
 
 :root {

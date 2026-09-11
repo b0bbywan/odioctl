@@ -1,12 +1,8 @@
 package web
 
-// The page: view models built from the App, markup in templates/*.gohtml —
-// composition ({{range}}, {{if}}, {{template}}) lives in the templates,
-// escaping in html/template. The stylesheet and logo in static/ mirror
-// odio-ui's look (go-odio-api), htmx and its SSE extension are odio-api's
-// copies. Each section subscribes to its own /events event and swaps
-// itself; a POST answers the notice (and the modal of an action), the
-// state follows on the stream.
+// The page: view models built from the App, markup and composition in
+// templates/*.gohtml, look and htmx copies from odio-ui in static/. Each
+// section swaps itself on its own /events event; a POST answers the notice.
 
 import (
 	"embed"
@@ -394,10 +390,8 @@ func stateOf(app *App) (*state.State, string) {
 // RenderPage is GET /: the sections as they stand, an empty #notice and
 // #modal for the POSTs to fill. host is the Host header the browser used.
 func RenderPage(app *App, host string) (string, error) {
-	// The Host header when the browser gave one (that name reaches the box),
-	// the box's own hostname otherwise — same address for the odio-ui link
-	// and ssh. The logo is that way home: this page is a settings annex of
-	// odio-ui.
+	// The Host header when the browser gave one (that name reaches odio), its
+	// own hostname otherwise — same address for the odio-ui link and ssh.
 	hostname := host
 	if hostname == "" {
 		hostname, _ = os.Hostname()

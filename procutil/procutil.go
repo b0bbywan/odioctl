@@ -7,10 +7,8 @@ import (
 	"os/exec"
 )
 
-// ExitCode turns the error from cmd.Run/Wait into the child's exit status.
-// A non-nil error means the child never ran or could not be waited for: the
-// caller decides what that is worth (a code of its own, a log line, or the
-// error itself).
+// ExitCode turns the error from cmd.Run/Wait into the child's exit status. A
+// non-nil error means the child never ran: the caller decides what that costs.
 func ExitCode(err error) (int, error) {
 	var ee *exec.ExitError
 	switch {

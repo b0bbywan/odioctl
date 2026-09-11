@@ -21,20 +21,14 @@ const (
 	LatestManifestURL = "https://odio.love/manifest.json"
 
 	// OdiosVersionEnv makes `check` compare against that release instead of
-	// the published latest one — a test box runs a pre-release ("pr-84")
-	// that the latest manifest knows nothing about, so without this every
-	// role it ships reads as "not in this release" and nothing is pending.
+	// the published latest: a test odio's pre-release ("pr-84") ships roles
+	// the latest manifest ignores, and nothing would ever read as pending.
 	OdiosVersionEnv = "ODIOCTL_ODIOS_VERSION"
 )
 
-// Only a *tag* is overridable, never a URL: the tag is interpolated into a
-// github.com/b0bbywan/odios path, so whoever sets it can pick another odios
-// release but can never point odioctl at a manifest of its own. That only
-// holds while the tag cannot walk out of the path — curl normalises away
-// `..`, so `../../someone/else/releases/download/x` would fetch (and pipe to
-// bash, in `apply`) a foreign repository. Real tags are calver
-// ("2026.7.0rc2"), git-described ("2026.7.0rc2-9-gcad916c") or PR
-// pre-releases ("pr-84").
+// Only a tag is overridable, never a URL, and it must not walk out of the
+// b0bbywan/odios path: `../..` would pipe a foreign repository into bash.
+// Real tags: "2026.7.0rc2", "2026.7.0rc2-9-gcad916c", "pr-84".
 var tagRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$`)
 
 // IsReleaseTag reports whether tag is safe to interpolate into a release URL.
@@ -50,9 +44,8 @@ func checkedTag(version string) (string, error) {
 }
 
 // EnvVersion returns the release tag from $ODIOCTL_ODIOS_VERSION, "" when
-// unset. An unusable value is a warning, not a failure: falling back to the
-// published manifest keeps the daily timer working on a box whose env file
-// has a typo in it.
+// unset. An unusable value only warns: falling back to the published manifest
+// keeps the daily timer working on an odio whose env file has a typo.
 func EnvVersion() string {
 	raw := strings.TrimSpace(os.Getenv(OdiosVersionEnv))
 	if raw == "" {
@@ -99,10 +92,8 @@ func ManifestURL(version string) (string, error) {
 
 var httpClient = &http.Client{Timeout: 10 * time.Second}
 
-// Fetch returns the manifest at url. Each caller decides what a failure
-// means: `check` makes it fatal, `apply` and the web refresh degrade
-// (install.sh defaults, cached manifest). A var so tests can swap the
-// network out.
+// Fetch returns the manifest at url; each caller decides what a failure means
+// (`check` fatal, `apply` and the web refresh degrade). A var, for tests.
 var Fetch = func(url string) (*Manifest, error) {
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
@@ -130,11 +121,8 @@ var Fetch = func(url string) (*Manifest, error) {
 
 // CheckSource returns the (manifest url, release tag) pair for `check`: the
 // requested tag — version or $ODIOCTL_ODIOS_VERSION — else the published
-// latest manifest and "". There is deliberately no way to name a URL. The tag
-// is what travels to `apply` through upgrades.json: a pre-release is reached
-// by its tag ("pr-84") while the manifest inside it describes itself by
-// version ("2026.7.0rc2-9-gcad916c"), so `apply` cannot rebuild the
-// install.sh URL from the version alone.
+// latest and "". The tag travels to `apply` through upgrades.json — the
+// version a pre-release calls itself cannot rebuild it.
 func CheckSource(version string) (url, tag string, err error) {
 	if version == "" {
 		version = EnvVersion()

@@ -1,9 +1,8 @@
 package web
 
-// odioctl-web.socket is the unit that gets enabled: systemd binds port 8021
-// and starts the service on the first connection, passing the listening
-// socket as fd 3 (sd_listen_fds(3)). Without LISTEN_FDS the server binds for
-// itself, so the dev loop and --bind/--port are unchanged.
+// odioctl-web.socket is the unit that gets enabled: systemd holds port 8021
+// and passes it as fd 3 (sd_listen_fds(3)). Without LISTEN_FDS the server
+// binds for itself, so the dev loop and --bind/--port are unchanged.
 
 import (
 	"fmt"
@@ -20,10 +19,9 @@ type ActivationError struct{ Reason string }
 
 func (e *ActivationError) Error() string { return e.Reason }
 
-// SystemdListener returns the listening socket passed by systemd, nil when
-// not socket-activated. The LISTEN_* variables are removed from the
-// environment so nothing we exec later (`sudo odioctl dac …`) sees a
-// handover meant for us.
+// SystemdListener returns the listening socket passed by systemd, nil when not
+// socket-activated. LISTEN_* is unset so nothing we exec later sees a handover
+// meant for us.
 func SystemdListener() (net.Listener, error) {
 	return systemdListener(sdListenFdsStart)
 }

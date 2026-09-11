@@ -15,7 +15,7 @@ import (
 )
 
 // A warning, not an error: a feature odios adds after this odioctl shipped
-// is unknown here, and the box is fine.
+// is unknown here, and odio is fine.
 func warnFeaturesUnknown(st state.State) string {
 	var bad []string
 	for _, f := range slices.Concat(st.Features, st.FeaturesExcluded) {

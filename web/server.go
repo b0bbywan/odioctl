@@ -1,11 +1,9 @@
 package web
 
-// The HTTP end of the settings UI: routes and the server. HTML forms over
-// htmx, no JSON API: a POST is answered with the notice and the state
-// follows on /events, the stream every section listens to; GET / is the
-// only page render. Runs as the target user (systemd --user unit). No
-// authentication: same LAN trust model as odio-api. Every form carries a
-// per-process token so a cross-site HTML form cannot drive the box.
+// The HTTP end of the settings UI: routes and the server. A POST is answered
+// with the notice, the state follows on /events; GET / is the only page
+// render. No authentication (same LAN trust as odio-api), but every form
+// carries a per-process token so a cross-site HTML form cannot drive odio.
 
 import (
 	"crypto/subtle"
@@ -72,11 +70,9 @@ func (h *handler) static(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(content)
 }
 
-// events is the stream the page connects to on load (sse-connect on the
-// body) and keeps: every section at once (the page may be stale by the
-// time it connects), then only what each change named. Subscribed before
-// the first send, so a change during it is not lost. A comment every 15s
-// keeps idle proxies from dropping the stream.
+// events is the stream the page opens on load and keeps: every section at
+// once (it may be stale by then), afterwards only what a change named.
+// Subscribed before the first send, so a change during it is not lost.
 func (h *handler) events(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -134,9 +130,9 @@ func (h *handler) setComponent(form url.Values, _ string) (string, *ActionResult
 	return msg, nil, err
 }
 
-// componentAction passes `host` along — the name the browser reached the box
+// componentAction passes `host` along — the name the browser reached odio
 // by becomes the OAuth callback host, so the redirect lands here and not on
-// the box's loopback.
+// odio's loopback.
 func (h *handler) componentAction(form url.Values, host string) (string, *ActionResult, error) {
 	kind, err := formKind(form)
 	if err != nil {
@@ -219,7 +215,7 @@ func (h *handler) form(action formAction) http.HandlerFunc {
 	}
 }
 
-// reboot answers before it acts: the box goes down the moment logind takes
+// reboot answers before it acts: odio goes down the moment logind takes
 // the request, this connection with it, so the notice has to be on the
 // wire first. A refusal reaches the page on the banners, through the stream.
 func (h *handler) reboot(w http.ResponseWriter, r *http.Request) {
@@ -309,10 +305,8 @@ func RunServe(stdout, stderr io.Writer, cfg Config) int {
 }
 
 func serveUntilSignal(stderr io.Writer, ln net.Listener, h http.Handler) int {
-	// A phone that sleeps mid-request or a stray `nc` on port 8021 must not
-	// pin a goroutine and an fd for the life of the process: bound every
-	// phase of a connection. The handlers themselves are quick (a POST
-	// forks and returns), so 30s of request time is generous.
+	// A sleeping phone or a stray `nc` on 8021 must not pin a goroutine and an
+	// fd for the life of the process: bound every phase. Handlers are quick.
 	srv := &http.Server{
 		Handler:           h,
 		ReadHeaderTimeout: 10 * time.Second,

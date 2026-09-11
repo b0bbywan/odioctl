@@ -65,9 +65,8 @@ func startAction(spawn func([]string) (ActionProcess, error), action components.
 }
 
 // drain reads the output until EOF — a full pipe would wedge the child — but
-// stops *recording* once the link is out: what a login helper prints after
-// the user is through is the credential it just obtained, and nothing that
-// lands in the output is worth painting into a browser.
+// stops *recording* once the link is out: what comes after is the credential
+// the helper just obtained, never something to paint into a browser.
 func (r *actionRun) drain() {
 	var once sync.Once
 	signal := func() { once.Do(func() { close(r.found) }) }

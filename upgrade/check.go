@@ -30,10 +30,8 @@ type RoleUpgrade struct {
 }
 
 // Report is the schema of upgrades.json (written by `check`, read by `apply`
-// and odio-api). Roles is a delta — only roles whose target > installed.
-// Manifest caches the full target snapshot so `apply` skips the network.
-// Latest is the version the target release calls itself; TargetTag the
-// GitHub tag it is published under ("2026.7.0rc2-9-gcad916c" vs "pr-84").
+// and odio-api). Roles is a delta, Manifest the snapshot that spares `apply`
+// the network, Latest the version and TargetTag the release it comes from.
 type Report struct {
 	Current           string            `json:"current"`
 	Latest            string            `json:"latest"`
@@ -171,14 +169,9 @@ func ReadReport(path string) *Report {
 }
 
 // check is the pipeline behind RunCheck and Refresh: state.json against the
-// target manifest, written to upgrades.json. RunCheck always fetches — it is
-// the network view. Refresh recomputes after a local change, so with
-// useCache it takes the manifest upgrades.json already holds when that was
-// written for the tag CheckSource resolved (or for whatever release it
-// cached when nothing pins one: losing the pin must not silently move the
-// box back to latest, `check` does that) and fetches only otherwise. A cache
-// is never reused under another tag: `apply` trusts target_tag to name the
-// manifest next to it.
+// target manifest, written to upgrades.json. RunCheck always fetches; Refresh
+// reuses the cached manifest, never under another tag than the one it was
+// written for — `apply` trusts target_tag to name the manifest next to it.
 func check(opts CheckOptions, useCache bool) (*Report, error) {
 	opts = opts.withDefaults()
 	st, err := state.Read(opts.State)

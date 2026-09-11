@@ -37,17 +37,9 @@ func warnIfErr(err error) {
 	}
 }
 
-// AtomicWriteText writes text to path atomically (temp file + rename in the
-// same directory).
-//
-// Mode (and owner/group, when running as root) are copied from the existing
-// file so a rewrite never widens or narrows permissions; a new file gets the
-// umask default (CreateTemp's 0600 would be wrong for a config other users
-// must read). chmod/chown are best-effort — vfat (the Pi boot partition)
-// fakes modes. When the directory itself refuses new files (e.g.
-// /var/lib/odio is 2750 and we are not root) we fall back to an in-place
-// rewrite of the existing file, which is not atomic but keeps the tool
-// usable; a file that is not writable either gets an actionable error.
+// AtomicWriteText writes text to path atomically (temp file + rename), keeping
+// the existing file's mode and owner — best-effort, vfat fakes modes. A
+// directory that refuses new files falls back to an in-place rewrite.
 func AtomicWriteText(path, text string) error {
 	abs, err := filepath.Abs(path)
 	if err != nil {
