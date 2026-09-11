@@ -3,6 +3,7 @@ package upgrade
 import (
 	"bytes"
 	"encoding/json"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -44,6 +45,7 @@ func TestDeriveRunEnv(t *testing.T) {
 	base := func(roles map[string]string) state.State {
 		st := makeState()
 		st.Roles = roles
+		st.Features = []string{"mympd"} // else pending under mpd
 		return st
 	}
 	t.Run("no manifest returns empty", func(t *testing.T) {
@@ -104,6 +106,35 @@ func TestDeriveRunEnv(t *testing.T) {
 		env := DeriveRunEnv(st, runManifest(map[string]string{"bluetooth": "2026.5.0b1"}),
 			map[string]string{"INSTALL_BLUETOOTH": "Y"})
 		if _, ok := env["RUN_BLUETOOTH"]; ok {
+			t.Errorf("env = %v", env)
+		}
+	})
+	current := map[string]string{"mpd": "2026.5.0", "upmpdcli": "2026.5.0", "odio_api": "2026.5.0"}
+	install := map[string]string{"INSTALL_MPD": "Y", "INSTALL_UPMPDCLI": "Y", "INSTALL_ODIO_API": "Y"}
+	t.Run("pending feature runs its parent and odio_api", func(t *testing.T) {
+		st := base(maps.Clone(current))
+		st.Features = []string{"tidal", "qobuz", "upnpwebradios"} // mympd pending
+		env := DeriveRunEnv(st, runManifest(current), install)
+		if want := map[string]string{"RUN_UPMPDCLI": "N"}; !reflect.DeepEqual(env, want) {
+			t.Errorf("env = %v, want %v", env, want)
+		}
+	})
+	t.Run("pending role runs odio_api", func(t *testing.T) {
+		st := base(maps.Clone(current))
+		st.Features = []string{"mympd", "tidal", "qobuz", "upnpwebradios"}
+		st.Roles["qbzd"] = "" // enabled in the UI, never installed
+		shipped := maps.Clone(current)
+		shipped["qbzd"] = "2026.5.0"
+		env := DeriveRunEnv(st, runManifest(shipped), install)
+		if want := map[string]string{"RUN_MPD": "N", "RUN_UPMPDCLI": "N"}; !reflect.DeepEqual(env, want) {
+			t.Errorf("env = %v, want %v", env, want)
+		}
+	})
+	t.Run("nothing pending skips odio_api", func(t *testing.T) {
+		st := base(maps.Clone(current))
+		st.Features = []string{"mympd", "tidal", "qobuz", "upnpwebradios"}
+		env := DeriveRunEnv(st, runManifest(current), install)
+		if env["RUN_ODIO_API"] != "N" {
 			t.Errorf("env = %v", env)
 		}
 	})
@@ -182,6 +213,7 @@ func TestTargetManifestReusesTheCacheOnlyForItsTag(t *testing.T) {
 func TestBuildApplyEnvSkipsUnchangedRoles(t *testing.T) {
 	st := makeState()
 	st.Roles = map[string]string{"mpd": "2026.5.0"}
+	st.Features = []string{"mympd"}
 	env, out := applyEnv(t, st, ApplyOptions{}, runManifest(map[string]string{"mpd": "2026.5.0"}))
 	if env["TARGET_USER"] != "alice" || env["ODIOS_VERSION"] != "2026.5.0" || env["RUN_MPD"] != "N" {
 		t.Errorf("env = %v", env)

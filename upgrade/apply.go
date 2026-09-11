@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/b0bbywan/odioctl/components"
 	"github.com/b0bbywan/odioctl/manifest"
 	"github.com/b0bbywan/odioctl/procutil"
 	"github.com/b0bbywan/odioctl/state"
@@ -68,16 +69,17 @@ func DeriveInstallEnv(st state.State) map[string]string {
 	return env
 }
 
-// DeriveRunEnv emits RUN_X=N for roles already at the target version, and
-// nothing otherwise: RUN_X is an internal optimisation, INSTALL_X the API.
+// DeriveRunEnv emits RUN_X=N for roles already at the target version and not
+// needed by a pending install: RUN_X is an internal optimisation, INSTALL_X the API.
 func DeriveRunEnv(st state.State, man *manifest.Manifest, installEnv map[string]string) map[string]string {
 	env := map[string]string{}
 	if man == nil {
 		return env
 	}
+	mustRun := components.PendingRuns(st, man.Roles)
 	for role, installed := range st.Roles {
 		// Excluded roles are already gated by INSTALL_X=N.
-		if installEnv["INSTALL_"+strings.ToUpper(role)] == "N" {
+		if installEnv["INSTALL_"+strings.ToUpper(role)] == "N" || slices.Contains(mustRun, role) {
 			continue
 		}
 		if versions.RoleUpToDate(installed, man.Roles[role], st.Odios) {
