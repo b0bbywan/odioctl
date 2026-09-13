@@ -49,7 +49,8 @@ type RoleInfo struct {
 	Description string // one line, what it does
 	Group       string
 	Package     string
-	OptIn       bool // install.sh asks [y/N]; see the package comment
+	OptIn       bool     // install.sh asks [y/N]; see the package comment
+	Archs       []string // dpkg architectures it installs on; empty = all
 	Actions     []Action
 }
 
@@ -244,6 +245,9 @@ func roleInfo(man *manifest.Manifest, name string) (RoleInfo, bool) {
 		info.Group = meta.Group
 	}
 	info.OptIn = meta.OptIn
+	if meta.Archs != nil {
+		info.Archs = meta.Archs
+	}
 	return info, true
 }
 
@@ -348,6 +352,14 @@ func List(st state.State, man *manifest.Manifest) []Component {
 	}
 	for _, n := range st.RolesExcluded {
 		roles[n] = true
+	}
+	// Not on this architecture: hidden unless installed or requested here,
+	// roles_excluded lists it on every odio install.sh skipped it on.
+	for n := range roles {
+		_, inRoles := st.Roles[n]
+		if info, ok := roleInfo(man, n); ok && !info.supported() && !inRoles {
+			delete(roles, n)
+		}
 	}
 	features := map[string]bool{}
 	for _, e := range featureCatalog {
@@ -457,6 +469,11 @@ func Set(st state.State, man *manifest.Manifest, kind Kind, name string, enabled
 	}
 	if kind == Role && infraRoles[name] {
 		return state.State{}, errorf("%q is an infrastructure role and cannot be toggled", name)
+	}
+	if kind == Role && enabled {
+		if info, ok := roleInfo(man, name); ok && !info.supported() {
+			return state.State{}, errorf("%q is not available on %s", name, arch)
+		}
 	}
 	if !known(st, man, kind, name) {
 		return state.State{}, errorf("unknown %s %q", kind, name)

@@ -73,6 +73,7 @@ type RoleMeta struct {
 	Group       string   `json:"group"`
 	Services    []string `json:"services"`
 	OptIn       bool     `json:"opt_in"`
+	Archs       []string `json:"archs,omitempty"` // dpkg architectures; empty = all
 }
 
 // releaseAssetURL is where GitHub serves asset for a release tag — the one
