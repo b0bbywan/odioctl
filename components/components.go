@@ -9,6 +9,7 @@ import (
 	"maps"
 	"slices"
 
+	"github.com/b0bbywan/odioctl/manifest"
 	"github.com/b0bbywan/odioctl/state"
 )
 
@@ -220,13 +221,30 @@ var featureCatalog = []catalogFeature{
 	}},
 }
 
-func roleInfo(name string) (RoleInfo, bool) {
+// roleInfo is the local entry overlaid with the target manifest's catalog:
+// description, group and opt-in come from the release, label and actions never do.
+func roleInfo(man *manifest.Manifest, name string) (RoleInfo, bool) {
+	var info RoleInfo
+	found := false
 	for _, e := range roleCatalog {
 		if e.name == name {
-			return e.info, true
+			info, found = e.info, true
+			break
 		}
 	}
-	return RoleInfo{}, false
+	if man == nil {
+		return info, found
+	}
+	meta, ok := man.Catalog[name]
+	if !ok {
+		return info, found
+	}
+	info.Description = cmp.Or(meta.Description, info.Description)
+	if slices.Contains(Groups, meta.Group) {
+		info.Group = meta.Group
+	}
+	info.OptIn = meta.OptIn
+	return info, true
 }
 
 func featureInfo(name string) (FeatureInfo, bool) {
@@ -284,7 +302,7 @@ func (c Component) Enabled() bool { return c.Status != Excluded }
 // Roles (so INSTALL_X=Y is emitted) but out of the version comparisons.
 const RequestedVersion = ""
 
-func roleStatus(st state.State, name string) Status {
+func roleStatus(st state.State, man *manifest.Manifest, name string) Status {
 	if v, ok := st.Roles[name]; ok {
 		if v != "" {
 			return Installed
@@ -294,7 +312,7 @@ func roleStatus(st state.State, name string) Status {
 	if slices.Contains(st.RolesExcluded, name) {
 		return Excluded
 	}
-	if info, ok := roleInfo(name); ok && info.OptIn {
+	if info, ok := roleInfo(man, name); ok && info.OptIn {
 		return Excluded // install.sh answers N: neither list means off, not default
 	}
 	return Default
@@ -311,12 +329,19 @@ func featureStatus(st state.State, name string) Status {
 }
 
 // List returns roles in catalog order (grouped), unknown roles last, then
-// features. shipped is the target release's role set (nil = unknown): roles it
-// lacks are dropped unless state.json names them, features follow their parent.
-func List(st state.State, shipped map[string]string) []Component {
+// features. man is the target release (nil = unknown): its catalog adds roles,
+// roles it lacks are dropped unless state.json names them, features follow their parent.
+func List(st state.State, man *manifest.Manifest) []Component {
+	var shipped map[string]string
 	roles := map[string]bool{}
 	for _, e := range roleCatalog {
 		roles[e.name] = true
+	}
+	if man != nil {
+		shipped = man.Roles
+		for n := range man.Catalog {
+			roles[n] = true
+		}
 	}
 	for n := range st.Roles {
 		roles[n] = true
@@ -366,20 +391,20 @@ func List(st state.State, shipped map[string]string) []Component {
 
 	out := make([]Component, 0, len(roleNames)+len(featureNames))
 	for _, name := range roleNames {
-		info, known := roleInfo(name)
+		info, known := roleInfo(man, name)
 		c := Component{
 			Kind:             Role,
 			Name:             name,
 			Label:            name,
 			Group:            Groups[len(Groups)-1],
-			Status:           roleStatus(st, name),
+			Status:           roleStatus(st, man, name),
 			InstalledVersion: st.Roles[name],
 			Toggleable:       !infraRoles[name],
 		}
 		if known {
-			c.Label = info.Label
+			c.Label = cmp.Or(info.Label, name)
 			c.Description = info.Description
-			c.Group = info.Group
+			c.Group = cmp.Or(info.Group, c.Group)
 			c.Actions = info.Actions
 		}
 		out = append(out, c)
@@ -414,9 +439,9 @@ func stateHasFeature(st state.State, name string) bool {
 	return slices.Contains(st.Features, name) || slices.Contains(st.FeaturesExcluded, name)
 }
 
-func known(st state.State, kind Kind, name string) bool {
+func known(st state.State, man *manifest.Manifest, kind Kind, name string) bool {
 	if kind == Role {
-		_, inCatalog := roleInfo(name)
+		_, inCatalog := roleInfo(man, name)
 		return inCatalog || stateHasRole(st, name)
 	}
 	_, inCatalog := featureInfo(name)
@@ -426,14 +451,14 @@ func known(st state.State, kind Kind, name string) bool {
 // Set returns a copy of st with name opted in or out. Disabling moves a role
 // into RolesExcluded; enabling clears the exclusion, and records an opt-in
 // role with RequestedVersion (install.sh would answer its [y/N] with N).
-func Set(st state.State, kind Kind, name string, enabled bool) (state.State, error) {
+func Set(st state.State, man *manifest.Manifest, kind Kind, name string, enabled bool) (state.State, error) {
 	if kind != Role && kind != Feature {
 		return state.State{}, errorf("unknown component kind %q", kind)
 	}
 	if kind == Role && infraRoles[name] {
 		return state.State{}, errorf("%q is an infrastructure role and cannot be toggled", name)
 	}
-	if !known(st, kind, name) {
+	if !known(st, man, kind, name) {
 		return state.State{}, errorf("unknown %s %q", kind, name)
 	}
 
@@ -447,7 +472,7 @@ func Set(st state.State, kind Kind, name string, enabled bool) (state.State, err
 	if kind == Role {
 		if enabled {
 			out.RolesExcluded = without(out.RolesExcluded, name)
-			if info, ok := roleInfo(name); ok && info.OptIn {
+			if info, ok := roleInfo(man, name); ok && info.OptIn {
 				if _, present := out.Roles[name]; !present {
 					out.Roles[name] = RequestedVersion
 				}
@@ -487,7 +512,7 @@ func without(list []string, name string) []string {
 func FindAction(kind Kind, name, actionID string) (Action, bool) {
 	var actions []Action
 	if kind == Role {
-		if info, ok := roleInfo(name); ok {
+		if info, ok := roleInfo(nil, name); ok {
 			actions = info.Actions
 		}
 	} else if info, ok := featureInfo(name); ok {
@@ -503,8 +528,8 @@ func FindAction(kind Kind, name, actionID string) (Action, bool) {
 
 // kindOf resolves a bare CLI name: a role if the catalog or state.json knows
 // it as one, a feature otherwise.
-func kindOf(st state.State, name string) Kind {
-	if _, ok := roleInfo(name); ok || stateHasRole(st, name) {
+func kindOf(st state.State, man *manifest.Manifest, name string) Kind {
+	if _, ok := roleInfo(man, name); ok || stateHasRole(st, name) {
 		return Role
 	}
 	return Feature
@@ -519,7 +544,7 @@ func KnownFeature(name string) bool {
 // LabelOf is the catalog label of a component, its name when unknown.
 func LabelOf(kind Kind, name string) string {
 	if kind == Role {
-		if info, ok := roleInfo(name); ok {
+		if info, ok := roleInfo(nil, name); ok {
 			return info.Label
 		}
 	} else if info, ok := featureInfo(name); ok {
@@ -530,9 +555,9 @@ func LabelOf(kind Kind, name string) string {
 
 // Pending lists what the next `upgrade apply` would install, as ["role:mpd",
 // "feature:mympd", …] in catalog order. Disabling is never pending.
-func Pending(st state.State, shipped map[string]string) []string {
+func Pending(st state.State, man *manifest.Manifest) []string {
 	var refs []string
-	for _, c := range pending(st, shipped) {
+	for _, c := range pending(st, man) {
 		refs = append(refs, string(c.Kind)+":"+c.Name)
 	}
 	return refs
@@ -540,9 +565,9 @@ func Pending(st state.State, shipped map[string]string) []string {
 
 // PendingRuns lists the roles that next apply must run for Pending to land: a
 // feature is installed by its parent, odio_api templates its service list.
-func PendingRuns(st state.State, shipped map[string]string) []string {
+func PendingRuns(st state.State, man *manifest.Manifest) []string {
 	var runs []string
-	for _, c := range pending(st, shipped) {
+	for _, c := range pending(st, man) {
 		role := c.Name
 		if c.Kind == Feature {
 			role = c.Parent
@@ -555,18 +580,18 @@ func PendingRuns(st state.State, shipped map[string]string) []string {
 	return runs
 }
 
-func pending(st state.State, shipped map[string]string) []Component {
+func pending(st state.State, man *manifest.Manifest) []Component {
 	ships := func(name string) bool {
-		if shipped == nil {
-			_, ok := roleInfo(name)
+		if man == nil || man.Roles == nil {
+			_, ok := roleInfo(man, name)
 			return ok
 		}
-		_, ok := shipped[name]
+		_, ok := man.Roles[name]
 		return ok
 	}
 	var pending []Component
 	pendingRoles := map[string]bool{}
-	for _, c := range List(st, nil) {
+	for _, c := range List(st, man) {
 		switch {
 		case c.Kind == Role:
 			if c.Toggleable && c.Status == Default && ships(c.Name) {

@@ -37,7 +37,7 @@ func (a *App) writeComponent(kind components.Kind, name string, enabled bool) er
 	if err != nil {
 		return &UserError{Msg: stateErrorMsg(a.cfg.StatePath, err)}
 	}
-	next, err := components.Set(st, kind, name, enabled)
+	next, err := components.Set(st, a.TargetManifest(), kind, name, enabled)
 	if err != nil {
 		return &UserError{Msg: err.Error()}
 	}

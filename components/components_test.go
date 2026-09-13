@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/b0bbywan/odioctl/manifest"
 	"github.com/b0bbywan/odioctl/state"
 )
 
@@ -104,7 +105,7 @@ func names(comps []Component) map[[2]string]bool {
 func TestShippedHidesWhatTheReleaseLacks(t *testing.T) {
 	st := makeState()
 	st.Roles = map[string]string{"mpd": "1", "upmpdcli": "1"}
-	n := names(List(st, map[string]string{"mpd": "x", "upmpdcli": "x"}))
+	n := names(List(st, &manifest.Manifest{Roles: map[string]string{"mpd": "x", "upmpdcli": "x"}}))
 	for _, absent := range [][2]string{{"role", "qbzd"}, {"role", "spotifyd"}} {
 		if n[absent] {
 			t.Errorf("%v should be hidden", absent)
@@ -122,7 +123,7 @@ func TestShippedKeepsWhatStateCarries(t *testing.T) {
 	st.Roles = map[string]string{"qbzd": ""}
 	st.RolesExcluded = []string{"spotifyd"}
 	st.Features = []string{"mympd"}
-	n := names(List(st, map[string]string{"mpd": "x"}))
+	n := names(List(st, &manifest.Manifest{Roles: map[string]string{"mpd": "x"}}))
 	for _, present := range [][2]string{{"role", "qbzd"}, {"role", "spotifyd"}, {"feature", "mympd"}} {
 		if !n[present] {
 			t.Errorf("%v should be listed", present)
@@ -133,7 +134,7 @@ func TestShippedKeepsWhatStateCarries(t *testing.T) {
 func TestShippedDropsFeaturesOfADroppedParent(t *testing.T) {
 	st := makeState()
 	st.Roles = map[string]string{"mpd": "1"}
-	n := names(List(st, map[string]string{"mpd": "x"}))
+	n := names(List(st, &manifest.Manifest{Roles: map[string]string{"mpd": "x"}}))
 	if n[[2]string{"feature", "tidal"}] {
 		t.Error("tidal should follow upmpdcli out")
 	}
@@ -145,7 +146,7 @@ func TestShippedDropsFeaturesOfADroppedParent(t *testing.T) {
 func TestDisableRoleMovesItOutOfRolesAndIntoExcluded(t *testing.T) {
 	st := makeState()
 	st.Roles = map[string]string{"mpd": "1", "spotifyd": "1"}
-	got, err := Set(st, Role, "spotifyd", false)
+	got, err := Set(st, nil, Role, "spotifyd", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +164,7 @@ func TestDisableRoleMovesItOutOfRolesAndIntoExcluded(t *testing.T) {
 func TestEnableRoleOnlyClearsExclusion(t *testing.T) {
 	st := makeState()
 	st.RolesExcluded = []string{"snapclient", "spotifyd"}
-	got, err := Set(st, Role, "spotifyd", true)
+	got, err := Set(st, nil, Role, "spotifyd", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +179,7 @@ func TestEnableRoleOnlyClearsExclusion(t *testing.T) {
 func TestDisableFeature(t *testing.T) {
 	st := makeState()
 	st.Features = []string{"qobuz", "tidal"}
-	got, err := Set(st, Feature, "tidal", false)
+	got, err := Set(st, nil, Feature, "tidal", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +192,7 @@ func TestDisableFeature(t *testing.T) {
 func TestEnableFeatureClearsExclusion(t *testing.T) {
 	st := makeState()
 	st.FeaturesExcluded = []string{"mympd"}
-	got, err := Set(st, Feature, "mympd", true)
+	got, err := Set(st, nil, Feature, "mympd", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,7 +204,7 @@ func TestEnableFeatureClearsExclusion(t *testing.T) {
 func TestSetIdempotent(t *testing.T) {
 	st := makeState()
 	st.RolesExcluded = []string{"spotifyd"}
-	got, err := Set(st, Role, "spotifyd", false)
+	got, err := Set(st, nil, Role, "spotifyd", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -215,24 +216,24 @@ func TestSetIdempotent(t *testing.T) {
 func TestInfraRoleRejected(t *testing.T) {
 	st := makeState()
 	st.Roles = map[string]string{"common": "1"}
-	_, err := Set(st, Role, "common", false)
+	_, err := Set(st, nil, Role, "common", false)
 	wantComponentError(t, err)
 }
 
 func TestUnknownKindAndNameRejected(t *testing.T) {
-	if _, err := Set(makeState(), "plugin", "mpd", true); err == nil {
+	if _, err := Set(makeState(), nil, "plugin", "mpd", true); err == nil {
 		t.Error("want error for unknown kind")
 	}
-	_, err := Set(makeState(), Role, "nope", false)
+	_, err := Set(makeState(), nil, Role, "nope", false)
 	wantComponentError(t, err)
-	_, err = Set(makeState(), Feature, "nope", true)
+	_, err = Set(makeState(), nil, Feature, "nope", true)
 	wantComponentError(t, err)
 }
 
 func TestUnknownNamePresentInStateAccepted(t *testing.T) {
 	st := makeState()
 	st.Roles = map[string]string{"newthing": "1"}
-	got, err := Set(st, Role, "newthing", false)
+	got, err := Set(st, nil, Role, "newthing", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -368,10 +369,10 @@ func TestQbzdLoginTakesTheCallbackHost(t *testing.T) {
 }
 
 func TestCatalogMarksQbzdOptIn(t *testing.T) {
-	if info, _ := roleInfo("qbzd"); !info.OptIn {
+	if info, _ := roleInfo(nil, "qbzd"); !info.OptIn {
 		t.Error("qbzd should be opt-in")
 	}
-	if info, _ := roleInfo("spotifyd"); info.OptIn {
+	if info, _ := roleInfo(nil, "spotifyd"); info.OptIn {
 		t.Error("spotifyd should not be opt-in")
 	}
 }
@@ -386,7 +387,7 @@ func TestOptInAbsentFromBothListsReadsAsOff(t *testing.T) {
 	if c.Status != Excluded || c.Enabled() {
 		t.Errorf("qbzd = %+v", c)
 	}
-	if p := Pending(st, map[string]string{"mpd": "x", "qbzd": "x"}); len(p) != 0 {
+	if p := Pending(st, &manifest.Manifest{Roles: map[string]string{"mpd": "x", "qbzd": "x"}}); len(p) != 0 {
 		t.Errorf("Pending = %v", p)
 	}
 }
@@ -395,7 +396,7 @@ func TestOptInEnableRecordsAnExplicitInstall(t *testing.T) {
 	st := makeState()
 	st.Roles = map[string]string{"mpd": "1"}
 	st.RolesExcluded = []string{"qbzd"}
-	got, err := Set(st, Role, "qbzd", true)
+	got, err := Set(st, nil, Role, "qbzd", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -406,7 +407,7 @@ func TestOptInEnableRecordsAnExplicitInstall(t *testing.T) {
 	if c.Status != Default || !c.Enabled() || c.InstalledVersion != "" {
 		t.Errorf("qbzd = %+v", c) // placeholder version never shown
 	}
-	if !slices.Contains(Pending(got, map[string]string{"mpd": "x", "qbzd": "x"}), "role:qbzd") {
+	if !slices.Contains(Pending(got, &manifest.Manifest{Roles: map[string]string{"mpd": "x", "qbzd": "x"}}), "role:qbzd") {
 		t.Error("role:qbzd should be pending")
 	}
 	if _, ok := st.Roles["qbzd"]; ok {
@@ -415,22 +416,22 @@ func TestOptInEnableRecordsAnExplicitInstall(t *testing.T) {
 }
 
 func TestOptInEnableIsIdempotentAndNeverClobbersARealVersion(t *testing.T) {
-	once, _ := Set(makeState(), Role, "qbzd", true)
-	twice, _ := Set(once, Role, "qbzd", true)
+	once, _ := Set(makeState(), nil, Role, "qbzd", true)
+	twice, _ := Set(once, nil, Role, "qbzd", true)
 	if twice.Roles["qbzd"] != "" || len(twice.Roles) != 1 {
 		t.Errorf("Roles = %v", twice.Roles)
 	}
 	installed := makeState()
 	installed.Roles = map[string]string{"qbzd": "2026.9.0b1"}
-	again, _ := Set(installed, Role, "qbzd", true)
+	again, _ := Set(installed, nil, Role, "qbzd", true)
 	if again.Roles["qbzd"] != "2026.9.0b1" {
 		t.Errorf("Roles = %v", again.Roles)
 	}
 }
 
 func TestOptInDisableAfterEnableRoundTrips(t *testing.T) {
-	enabled, _ := Set(makeState(), Role, "qbzd", true)
-	back, err := Set(enabled, Role, "qbzd", false)
+	enabled, _ := Set(makeState(), nil, Role, "qbzd", true)
+	back, err := Set(enabled, nil, Role, "qbzd", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -452,7 +453,7 @@ func TestInstalledQbzdLooksLikeAnyOtherRole(t *testing.T) {
 	if c.Status != Installed || c.InstalledVersion != "2026.9.0b1" {
 		t.Errorf("qbzd = %+v", c)
 	}
-	if p := Pending(st, map[string]string{"qbzd": "x"}); len(p) != 0 {
+	if p := Pending(st, &manifest.Manifest{Roles: map[string]string{"qbzd": "x"}}); len(p) != 0 {
 		t.Errorf("Pending = %v", p)
 	}
 }
