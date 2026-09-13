@@ -99,3 +99,63 @@ func TestManifestWithoutCatalogIsTheLocalCatalog(t *testing.T) {
 		t.Errorf("roleInfo = %+v, want %+v", remote, local)
 	}
 }
+
+func onArch(t *testing.T, a string) {
+	t.Helper()
+	prev := arch
+	arch = a
+	t.Cleanup(func() { arch = prev })
+}
+
+func lists(comps []Component, name string) bool {
+	return slices.ContainsFunc(comps, func(c Component) bool { return c.Kind == Role && c.Name == name })
+}
+
+func TestManifestArchsHideAnUnsupportedRole(t *testing.T) {
+	onArch(t, "armhf")
+	st := makeState()
+	st.Roles = map[string]string{"mpd": "1"}
+	st.RolesExcluded = []string{"newrole"} // what install.sh leaves on armhf
+	man := withCatalog(manifest.RoleMeta{Group: "System", Archs: []string{"amd64", "arm64"}})
+	if lists(List(st, man), "newrole") {
+		t.Error("newrole listed on armhf")
+	}
+	if slices.Contains(Pending(st, man), "role:newrole") {
+		t.Error("newrole pending on armhf")
+	}
+	_, err := Set(st, man, Role, "newrole", true)
+	wantComponentError(t, err)
+}
+
+func TestManifestArchsKeepARoleInstalledHere(t *testing.T) {
+	onArch(t, "armhf")
+	st := makeState()
+	st.Roles = map[string]string{"newrole": "1"}
+	man := withCatalog(manifest.RoleMeta{Group: "System", Archs: []string{"amd64", "arm64"}})
+	if !lists(List(st, man), "newrole") {
+		t.Error("an installed newrole must stay listed, if only to be disabled")
+	}
+	if _, err := Set(st, man, Role, "newrole", false); err != nil {
+		t.Errorf("disable = %v", err)
+	}
+}
+
+func TestManifestArchsAllowThisArch(t *testing.T) {
+	onArch(t, "arm64")
+	st := makeState()
+	man := withCatalog(manifest.RoleMeta{Group: "System", OptIn: true, Archs: []string{"amd64", "arm64"}})
+	if !lists(List(st, man), "newrole") {
+		t.Error("newrole hidden on arm64")
+	}
+	if _, err := Set(st, man, Role, "newrole", true); err != nil {
+		t.Errorf("enable = %v", err)
+	}
+}
+
+func TestDebArch(t *testing.T) {
+	for goarch, want := range map[string]string{"arm": "armhf", "arm64": "arm64", "amd64": "amd64"} {
+		if got := debArch(goarch); got != want {
+			t.Errorf("debArch(%q) = %q, want %q", goarch, got, want)
+		}
+	}
+}

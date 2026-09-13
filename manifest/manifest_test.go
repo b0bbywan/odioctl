@@ -149,11 +149,13 @@ func TestFetchReturnsParsedManifest(t *testing.T) {
 func TestFetchReadsTheCatalog(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(`{"odios": "2026.9.0", "roles": {"display": "2026.9.0"}, "catalog": {"display":
-			{"description": "Kiosk", "group": "System", "services": ["odio-screen.service"], "opt_in": true}}}`))
+			{"description": "Kiosk", "group": "System", "services": ["odio-screen.service"], "opt_in": true,
+			"archs": ["amd64", "arm64"]}}}`))
 	}))
 	defer srv.Close()
 	got, err := Fetch(srv.URL)
-	want := RoleMeta{Description: "Kiosk", Group: "System", Services: []string{"odio-screen.service"}, OptIn: true}
+	want := RoleMeta{Description: "Kiosk", Group: "System", Services: []string{"odio-screen.service"}, OptIn: true,
+		Archs: []string{"amd64", "arm64"}}
 	if err != nil || !reflect.DeepEqual(got.Catalog["display"], want) {
 		t.Errorf("Fetch = %+v, %v; want display %+v", got, err, want)
 	}

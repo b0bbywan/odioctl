@@ -82,6 +82,8 @@ since rewritten in Go.
 - **The role catalog is local, overlaid by the target manifest's `catalog`**
   (`components.roleInfo`): description, known group and opt-in come from the
   release, so a new odios role needs no odioctl release; label and `Actions` never do.
+  A role whose `archs` exclude this odio's (`components.arch`, from GOARCH) is
+  hidden unless state.json's `roles` has it, and cannot be enabled.
 - **The target release is decided in one place: `check`.** `apply` never picks
   a release of its own on odio (`odio-upgrade.service` is a frozen sudoers
   argv, no `--version`), it follows upgrades.json — read once through
