@@ -155,6 +155,13 @@ var roleCatalog = []catalogRole{
 		Description: "Login banner",
 		Group:       "System",
 	}},
+	{"display", RoleInfo{
+		Label:       "Display",
+		Description: "Kiosk browser on an attached screen (experimental)",
+		Group:       "System",
+		Package:     "fbrowser-kiosk",
+		OptIn:       true,
+	}},
 	{"common", RoleInfo{
 		Label:       "Base system",
 		Description: "Core configuration shared by every component",
