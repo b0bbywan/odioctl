@@ -80,7 +80,7 @@ func computeRoleUpgrades(st state.State, man manifest.Manifest) []RoleUpgrade {
 
 func buildReport(st state.State, man manifest.Manifest, targetTag string) Report {
 	upgrades := computeRoleUpgrades(st, man)
-	pending := components.Pending(st, man.Roles)
+	pending := components.Pending(st, &man)
 	if pending == nil {
 		pending = []string{}
 	}
@@ -166,6 +166,15 @@ func ReadReport(path string) *Report {
 		r.PendingComponents = []string{}
 	}
 	return &r
+}
+
+// CachedManifest is the target manifest of the upgrades.json at path, nil
+// when there is no report.
+func CachedManifest(path string) *manifest.Manifest {
+	if r := ReadReport(path); r != nil {
+		return &r.Manifest
+	}
+	return nil
 }
 
 // check is the pipeline behind RunCheck and Refresh: state.json against the

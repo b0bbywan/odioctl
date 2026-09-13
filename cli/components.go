@@ -6,6 +6,7 @@ import (
 
 	"github.com/b0bbywan/odioctl/components"
 	"github.com/b0bbywan/odioctl/state"
+	"github.com/b0bbywan/odioctl/upgrade"
 )
 
 func runComponents(stdout, stderr io.Writer, args []string) int {
@@ -19,6 +20,8 @@ func runComponents(stdout, stderr io.Writer, args []string) int {
 		fmt.Fprintln(stderr, "usage: odioctl components [--state PATH] list|enable|disable ...")
 		return 2
 	}
+	// The target manifest `check` cached, so its catalog describes new roles.
+	man := upgrade.CachedManifest(state.UpgradesPathFor(*statePath))
 	switch rest[0] {
 	case "list":
 		lfs := newFlagSet("components list", stderr)
@@ -26,13 +29,13 @@ func runComponents(stdout, stderr io.Writer, args []string) int {
 		if code, done := parse(lfs, rest[1:]); done {
 			return code
 		}
-		return components.RunList(stdout, stderr, *statePath, *asJSON)
+		return components.RunList(stdout, stderr, *statePath, man, *asJSON)
 	case "enable", "disable":
 		if len(rest) != 2 {
 			fmt.Fprintf(stderr, "usage: odioctl components %s NAME\n", rest[0])
 			return 2
 		}
-		return components.RunSet(stdout, stderr, *statePath, rest[1], rest[0] == "enable")
+		return components.RunSet(stdout, stderr, *statePath, man, rest[1], rest[0] == "enable")
 	default:
 		fmt.Fprintf(stderr, "odioctl components: unknown command %q\n", rest[0])
 		return 2

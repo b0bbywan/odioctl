@@ -61,8 +61,18 @@ func EnvVersion() string {
 // Manifest is the schema of a release manifest.json (built by odios'
 // scripts/build-manifest.py).
 type Manifest struct {
-	Odios string            `json:"odios"`
-	Roles map[string]string `json:"roles"`
+	Odios   string              `json:"odios"`
+	Roles   map[string]string   `json:"roles"`
+	Catalog map[string]RoleMeta `json:"catalog,omitempty"`
+}
+
+// RoleMeta is a role's catalog entry as odios publishes it; actions are never
+// part of it, an argv does not come from a downloaded file.
+type RoleMeta struct {
+	Description string   `json:"description"`
+	Group       string   `json:"group"`
+	Services    []string `json:"services"`
+	OptIn       bool     `json:"opt_in"`
 }
 
 // releaseAssetURL is where GitHub serves asset for a release tag — the one

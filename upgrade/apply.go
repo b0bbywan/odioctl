@@ -76,7 +76,7 @@ func DeriveRunEnv(st state.State, man *manifest.Manifest, installEnv map[string]
 	if man == nil {
 		return env
 	}
-	mustRun := components.PendingRuns(st, man.Roles)
+	mustRun := components.PendingRuns(st, man)
 	for role, installed := range st.Roles {
 		// Excluded roles are already gated by INSTALL_X=N.
 		if installEnv["INSTALL_"+strings.ToUpper(role)] == "N" || slices.Contains(mustRun, role) {

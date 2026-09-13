@@ -163,7 +163,7 @@ func componentsViewOf(app *App, st *state.State, stateErr string) componentsView
 	if st == nil {
 		return componentsView{Err: "state.json: " + stateErr}
 	}
-	comps := components.List(*st, app.AvailableRoles())
+	comps := components.List(*st, app.TargetManifest())
 	byParent := map[string][]components.Component{}
 	var orphans []components.Component
 	for _, f := range comps {
