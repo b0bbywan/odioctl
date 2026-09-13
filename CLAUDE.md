@@ -79,6 +79,9 @@ since rewritten in Go.
   check, and a cache is never re-stamped with another tag) so the badge
   lights up and `apply` does not refuse. Disabling is never pending.
   The `Report` struct's field order and json tags are the wire format.
+- **The role catalog is local, overlaid by the target manifest's `catalog`**
+  (`components.roleInfo`): description, known group and opt-in come from the
+  release, so a new odios role needs no odioctl release; label and `Actions` never do.
 - **The target release is decided in one place: `check`.** `apply` never picks
   a release of its own on odio (`odio-upgrade.service` is a frozen sudoers
   argv, no `--version`), it follows upgrades.json — read once through

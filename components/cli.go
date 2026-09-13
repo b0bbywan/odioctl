@@ -9,6 +9,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/b0bbywan/odioctl/manifest"
 	"github.com/b0bbywan/odioctl/state"
 )
 
@@ -87,13 +88,13 @@ func printTable(w io.Writer, comps []Component) {
 }
 
 // RunList shows every role/feature and its status.
-func RunList(stdout, stderr io.Writer, statePath string, asJSON bool) int {
+func RunList(stdout, stderr io.Writer, statePath string, man *manifest.Manifest, asJSON bool) int {
 	st, err := state.Read(statePath)
 	if err != nil {
 		fmt.Fprintf(stderr, "Error reading %s: %v\n", statePath, err)
 		return 2
 	}
-	comps := List(st, nil)
+	comps := List(st, man)
 	if !asJSON {
 		printTable(stdout, comps)
 		return 0
@@ -108,14 +109,14 @@ func RunList(stdout, stderr io.Writer, statePath string, asJSON bool) int {
 }
 
 // RunSet enables or disables a role/feature by bare name.
-func RunSet(stdout, stderr io.Writer, statePath, name string, enabled bool) int {
+func RunSet(stdout, stderr io.Writer, statePath string, man *manifest.Manifest, name string, enabled bool) int {
 	st, err := state.Read(statePath)
 	if err != nil {
 		fmt.Fprintf(stderr, "Error reading %s: %v\n", statePath, err)
 		return 2
 	}
-	kind := kindOf(st, name)
-	newState, err := Set(st, kind, name, enabled)
+	kind := kindOf(st, man, name)
+	newState, err := Set(st, man, kind, name, enabled)
 	if err != nil {
 		fmt.Fprintf(stderr, "Error: %v\n", err)
 		return 2

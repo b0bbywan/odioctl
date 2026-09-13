@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/b0bbywan/odioctl/dac"
+	"github.com/b0bbywan/odioctl/manifest"
 	"github.com/b0bbywan/odioctl/state"
 	"github.com/b0bbywan/odioctl/upgrade"
 )
@@ -126,12 +127,9 @@ func (a *App) UpgradeReport() *upgrade.Report {
 	return upgrade.ReadReport(a.cfg.ResolvedUpgradesPath())
 }
 
-// AvailableRoles is the target release's role set, nil until a check has run.
-func (a *App) AvailableRoles() map[string]string {
-	if report := a.UpgradeReport(); report != nil {
-		return report.Manifest.Roles
-	}
-	return nil
+// TargetManifest is the target release's manifest, nil until a check has run.
+func (a *App) TargetManifest() *manifest.Manifest {
+	return upgrade.CachedManifest(a.cfg.ResolvedUpgradesPath())
 }
 
 // runChecked turns any subprocess failure into a UserError banner.
