@@ -21,6 +21,7 @@ commands:
   components   list / enable / disable roles and features
   dac          select the DAC overlay in config.txt
   web          serve the local web UI
+  state        record what an odios run installed (odios calls it)
 `
 
 // Run dispatches argv (without the program name) and returns the exit code.
@@ -46,6 +47,8 @@ func Run(stdout, stderr io.Writer, argv []string) int {
 		return runDAC(stdout, stderr, argv[1:])
 	case "web":
 		return runWeb(stdout, stderr, argv[1:])
+	case "state":
+		return runState(stdout, stderr, argv[1:])
 	default:
 		fmt.Fprintf(stderr, "odioctl: unknown command %q\n%s", argv[0], usageText)
 		return 2
