@@ -21,7 +21,7 @@ commands:
   components   list / enable / disable roles and features
   dac          select the DAC overlay in config.txt
   web          serve the local web UI
-  state        record what an odios run installed (odios calls it)
+  state        record what an odios run installed / show state.json (for odios)
 `
 
 // Run dispatches argv (without the program name) and returns the exit code.
