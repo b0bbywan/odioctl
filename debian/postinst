@@ -8,3 +8,15 @@ set -e
 if ! getent group odioctl >/dev/null; then
     addgroup --system odioctl
 fi
+
+# state.json and upgrades.json are odioctl's: the target user edits the first
+# and refreshes the second through `odio`, odio-api and odio-motd read the
+# latter. odios' common role creates the group first; this covers the package
+# installed alone. Enforced on every install, like the schema.
+if ! getent group odio >/dev/null; then
+    addgroup --system odio
+fi
+install -d /var/lib/odio /var/cache/odio
+chown root:odio /var/lib/odio /var/cache/odio
+chmod 2770 /var/lib/odio
+chmod 2775 /var/cache/odio

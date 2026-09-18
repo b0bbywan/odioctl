@@ -52,3 +52,4 @@ contents:
 
 scripts:
   postinstall: debian/postinst
+  postremove: debian/postrm

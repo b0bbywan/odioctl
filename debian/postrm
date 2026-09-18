@@ -1,0 +1,8 @@
+#!/bin/sh
+set -e
+
+# upgrades.json is a cache `odioctl upgrade check` rebuilds: purge takes it.
+# /var/lib/odio stays, state.json is not something to regenerate.
+if [ "$1" = purge ]; then
+    rm -rf /var/cache/odio
+fi
