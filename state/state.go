@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 
@@ -33,7 +34,7 @@ func UpgradesPathFor(statePath string) string {
 	return filepath.Join(filepath.Dir(statePath), "upgrades.json")
 }
 
-// State is the schema of state.json as written by odios' write_state.yml.
+// State is the schema of state.json, the only place it is spelled out.
 type State struct {
 	Odios            string            `json:"odios"`
 	InstallMode      string            `json:"install_mode"`
@@ -45,6 +46,16 @@ type State struct {
 	ReleaseHistory   []string          `json:"release_history"`
 }
 
+// keys are State's json names in field order, every one required.
+var keys = func() (all []string) {
+	t := reflect.TypeFor[State]()
+	for i := range t.NumField() {
+		name, _, _ := strings.Cut(t.Field(i).Tag.Get("json"), ",")
+		all = append(all, name)
+	}
+	return all
+}()
+
 // SchemaError reports a state.json missing required fields or with the wrong
 // shape.
 type SchemaError struct{ Reason string }
@@ -55,69 +66,53 @@ func schemaErrorf(format string, args ...any) error {
 	return &SchemaError{Reason: fmt.Sprintf(format, args...)}
 }
 
-// Parse decodes and validates state.json content. Pointer fields distinguish
-// a missing key from a zero value; the decoder itself rejects wrong shapes.
-func Parse(b []byte) (State, error) {
-	var raw struct {
-		Odios            *string            `json:"odios"`
-		InstallMode      *string            `json:"install_mode"`
-		TargetUser       *string            `json:"target_user"`
-		Roles            *map[string]string `json:"roles"`
-		RolesExcluded    *[]string          `json:"roles_excluded"`
-		Features         *[]string          `json:"features"`
-		FeaturesExcluded *[]string          `json:"features_excluded"`
-		ReleaseHistory   *[]string          `json:"release_history"`
-	}
-	if err := json.Unmarshal(b, &raw); err != nil {
+// decode reads b over st once every key is there and not null.
+func decode(b []byte, st *State) error {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(b, &fields); err != nil {
 		var ute *json.UnmarshalTypeError
 		if errors.As(err, &ute) {
-			if ute.Field == "" {
-				return State{}, schemaErrorf("state.json must be a JSON object")
-			}
-			return State{}, schemaErrorf("state.json field %q has the wrong shape (want %s)",
-				ute.Field, ute.Type)
+			return schemaErrorf("state.json must be a JSON object")
 		}
-		return State{}, err
+		return err
 	}
 	var missing []string
-	for _, f := range []struct {
-		name string
-		set  bool
-	}{
-		{"odios", raw.Odios != nil},
-		{"install_mode", raw.InstallMode != nil},
-		{"target_user", raw.TargetUser != nil},
-		{"roles", raw.Roles != nil},
-		{"roles_excluded", raw.RolesExcluded != nil},
-		{"features", raw.Features != nil},
-		{"features_excluded", raw.FeaturesExcluded != nil},
-		{"release_history", raw.ReleaseHistory != nil},
-	} {
-		if !f.set {
-			missing = append(missing, f.name)
+	for _, name := range keys {
+		if raw, ok := fields[name]; !ok || string(raw) == "null" {
+			missing = append(missing, name)
 		}
 	}
 	if len(missing) > 0 {
-		return State{}, schemaErrorf("state.json missing required fields: %s",
-			strings.Join(missing, ", "))
+		return schemaErrorf("state.json missing required fields: %s", strings.Join(missing, ", "))
 	}
+	if err := json.Unmarshal(b, st); err != nil {
+		var ute *json.UnmarshalTypeError
+		if errors.As(err, &ute) {
+			return schemaErrorf("state.json field %q has the wrong shape (want %s)", ute.Field, ute.Type)
+		}
+		return err
+	}
+	return validate(*st)
+}
+
+func validate(st State) error {
 	for name, v := range map[string]string{
-		"odios": *raw.Odios, "install_mode": *raw.InstallMode, "target_user": *raw.TargetUser,
+		"odios": st.Odios, "install_mode": st.InstallMode, "target_user": st.TargetUser,
 	} {
 		if v == "" {
-			return State{}, schemaErrorf("state.json field %q must be a non-empty string", name)
+			return schemaErrorf("state.json field %q must be a non-empty string", name)
 		}
 	}
-	return State{
-		Odios:            *raw.Odios,
-		InstallMode:      *raw.InstallMode,
-		TargetUser:       *raw.TargetUser,
-		Roles:            *raw.Roles,
-		RolesExcluded:    *raw.RolesExcluded,
-		Features:         *raw.Features,
-		FeaturesExcluded: *raw.FeaturesExcluded,
-		ReleaseHistory:   *raw.ReleaseHistory,
-	}, nil
+	return nil
+}
+
+// Parse decodes and validates state.json content.
+func Parse(b []byte) (State, error) {
+	var st State
+	if err := decode(b, &st); err != nil {
+		return State{}, err
+	}
+	return st, nil
 }
 
 // Read loads and validates state.json.
@@ -129,36 +124,23 @@ func Read(path string) (State, error) {
 	return Parse(b)
 }
 
-// Write rewrites state.json in the shape ansible's to_nice_json produces
-// (indent 4, sorted keys), so it diffs cleanly against the next ansible run.
+// Write rewrites state.json, indent 4 in field order.
 func Write(path string, st State) error {
-	return fsutil.AtomicWriteJSON(path, st.sortedMap())
+	return fsutil.AtomicWriteJSON(path, st.complete())
 }
 
-// sortedMap gives AtomicWriteJSON a map (keys marshal sorted) with no nil
-// slice — nil would serialize as null, which Parse rejects on read-back.
-func (st State) sortedMap() map[string]any {
-	roles := st.Roles
-	if roles == nil {
-		roles = map[string]string{}
+// complete fills what Parse would refuse on read-back: a nil list or map
+// marshals as null.
+func (st State) complete() State {
+	if st.Roles == nil {
+		st.Roles = map[string]string{}
 	}
-	return map[string]any{
-		"odios":             st.Odios,
-		"install_mode":      st.InstallMode,
-		"target_user":       st.TargetUser,
-		"roles":             roles,
-		"roles_excluded":    emptyIfNil(st.RolesExcluded),
-		"features":          emptyIfNil(st.Features),
-		"features_excluded": emptyIfNil(st.FeaturesExcluded),
-		"release_history":   emptyIfNil(st.ReleaseHistory),
+	for _, list := range []*[]string{&st.RolesExcluded, &st.Features, &st.FeaturesExcluded, &st.ReleaseHistory} {
+		if *list == nil {
+			*list = []string{}
+		}
 	}
-}
-
-func emptyIfNil(s []string) []string {
-	if s == nil {
-		return []string{}
-	}
-	return s
+	return st
 }
 
 // PrintSummary writes the four component lists, one per line.
