@@ -210,6 +210,21 @@ func TestTargetManifestReusesTheCacheOnlyForItsTag(t *testing.T) {
 	}
 }
 
+// A re-run never prompts: what install.sh asked at install comes from the state.
+func TestBuildApplyEnvHandsBackTheInstallAnswers(t *testing.T) {
+	st := makeState()
+	st.Audioserver = state.PipeWire
+	st.MPDMusicDirectory = "/mnt/nas/music"
+	env, _ := applyEnv(t, st, ApplyOptions{}, nil)
+	if env["AUDIOSERVER"] != "pipewire" || env["MPD_MUSIC_DIRECTORY"] != "/mnt/nas/music" {
+		t.Errorf("env = %v", env)
+	}
+	// not recorded: install.sh's default, not an empty override
+	if _, set := env["MPD_CONF_PATH"]; set {
+		t.Errorf("MPD_CONF_PATH = %q", env["MPD_CONF_PATH"])
+	}
+}
+
 func TestBuildApplyEnvSkipsUnchangedRoles(t *testing.T) {
 	st := makeState()
 	st.Roles = map[string]string{"mpd": "2026.5.0"}
