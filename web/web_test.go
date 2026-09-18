@@ -108,7 +108,10 @@ func newFixture(t *testing.T) *fixture {
 		},
 		Log: &f.logs,
 	})
-	f.srv = httptest.NewServer(NewHandler(f.app))
+	// the real server's config, so the port's connections go through markProxied too
+	f.srv = httptest.NewUnstartedServer(nil)
+	f.srv.Config = newServer(NewHandler(f.app))
+	f.srv.Start()
 	t.Cleanup(f.srv.Close)
 	t.Cleanup(f.stopRuns)
 	return f
@@ -1074,6 +1077,86 @@ func TestProxiedActionCallsBackToTheForwardedHost(t *testing.T) {
 		t.Errorf("argv = %v", argv)
 	}
 	wants(t, f.logs.String(), "from 192.0.2.7")
+}
+
+// On the port, a forged X-Forwarded-Host must not become the OAuth callback
+// host, nor X-Forwarded-For the address in the log.
+func TestForwardedHeadersCannotSteerAnActionOnThePort(t *testing.T) {
+	f := newFixture(t)
+	f.installQbzd()
+	form := url.Values{"token": {f.app.Token()}, "kind": {"role"}, "name": {"qbzd"}, "action": {"login"}}
+	req, _ := http.NewRequest(http.MethodPost, f.srv.URL+"/components/action", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("X-Forwarded-Host", "evil.example")
+	req.Header.Set("X-Forwarded-For", "192.0.2.66")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if argv := f.spawns[0]; argv[3] != "127.0.0.1" {
+		t.Errorf("argv = %v", argv)
+	}
+	if strings.Contains(f.logs.String(), "192.0.2.66") {
+		t.Errorf("log believed X-Forwarded-For: %s", f.logs.String())
+	}
+}
+
+// The proxy is a door, not a pass: a POST through it still needs the token.
+func TestProxiedPostStillNeedsTheToken(t *testing.T) {
+	f := newFixture(t)
+	f.installQbzd()
+	form := url.Values{"kind": {"role"}, "name": {"qbzd"}, "action": {"login"}}
+	req, _ := http.NewRequest(http.MethodPost, "http://odioctl/components/action", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("X-Forwarded-Host", "odio.local")
+	body := f.viaProxy(req)
+	wants(t, body, "invalid or missing form token")
+	if len(f.spawns) != 0 {
+		t.Errorf("spawned %v", f.spawns)
+	}
+}
+
+// Whatever the prefix, <base> stays a path on the page's own origin and the
+// markup around it intact.
+func TestProxiedPrefixCannotLeaveTheOrigin(t *testing.T) {
+	for prefix, base := range map[string]string{
+		`/admin"><script>alert(1)</script>`: `<base href="/">`,
+		"//evil.example/x":                  `<base href="/evil.example/x/">`,
+		"https://evil.example/":             `<base href="/">`,
+		"/admin/../../..":                   `<base href="/">`,
+	} {
+		f := newFixture(t)
+		req, _ := http.NewRequest(http.MethodGet, "http://odioctl/", nil)
+		req.Header.Set("X-Forwarded-Prefix", prefix)
+		body := f.viaProxy(req)
+		wants(t, body, base)
+		if strings.Contains(body, "alert(1)") || strings.Contains(body, `="//`) || strings.Contains(body, "evil.example/\"") {
+			t.Errorf("prefix %q leaked into the page", prefix)
+		}
+	}
+}
+
+// The socket systemd passes is trusted like the one --socket binds.
+func TestAPassedUnixSocketIsTheProxyDoor(t *testing.T) {
+	f := newFixture(t)
+	unix := unixListener(t)
+	inherited, err := systemdListeners(passFds(t, unix))
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := newServer(NewHandler(f.app))
+	go srv.Serve(inherited[0])
+	t.Cleanup(func() { srv.Close() })
+	req, _ := http.NewRequest(http.MethodGet, "http://odioctl/", nil)
+	req.Header.Set("X-Forwarded-Prefix", "/admin")
+	resp, err := unixClient(unix.Addr().String()).Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	wants(t, string(body), `<base href="/admin/">`)
 }
 
 func TestPageAttributesAreSeparated(t *testing.T) {
