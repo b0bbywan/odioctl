@@ -1,10 +1,9 @@
 package web
 
-// odioctl-web.socket is the unit that gets enabled: systemd holds port 8021
-// and passes it from fd 3 on (sd_listen_fds(3)); odioctl-web-proxy.socket,
-// when odios enables it, adds the Unix socket odio-api proxies to. Without
-// LISTEN_FDS the server binds for itself, so the dev loop and
-// --bind/--port/--socket are unchanged.
+// The sockets are the units that get enabled — odioctl-web.socket (port
+// 8021), odioctl-web-proxy.socket (the Unix socket odio-api proxies to), one
+// or both — and systemd passes those running from fd 3 on (sd_listen_fds(3)).
+// Without LISTEN_FDS the server binds for itself unless --systemd-only.
 
 import (
 	"fmt"

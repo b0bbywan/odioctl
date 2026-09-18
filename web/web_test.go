@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -893,7 +894,7 @@ func TestDacSetRunsPrivilegedAndMarksReboot(t *testing.T) {
 		t.Error("config.txt not updated")
 	}
 	_, body = f.get("/")
-	wants(t, body, "A reboot is required", `<form hx-post="/reboot"`, "Reboot now")
+	wants(t, body, "A reboot is required", `<form hx-post="reboot"`, "Reboot now")
 	// the button asks logind as the user (odios' polkit rule), no sudo —
 	// once the notice is out, since odio goes down on the spot
 	_, body = f.post("/reboot", url.Values{}, true)
@@ -1003,5 +1004,103 @@ func TestHostHeaderDrivesTheOdioUILink(t *testing.T) {
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
-	wants(t, string(body), "http://odio.local:8018/ui")
+	wants(t, string(body), "http://odio.local:8018/ui", `<base href="/">`)
+}
+
+func TestConfiguredUIURLWinsOverTheGuess(t *testing.T) {
+	f := newFixture(t)
+	cfg := f.app.Config()
+	cfg.UIURL = "https://odio.example/ui"
+	f.app.cfg = cfg
+	_, body := f.get("/")
+	wants(t, body, `href="https://odio.example/ui"`)
+	if strings.Contains(body, ":8018/ui") {
+		t.Error("the port guess is still in the page")
+	}
+}
+
+// viaProxy sends req to the fixture's app on a Unix socket, the way odio-api's
+// reverse proxy reaches it (headers as its SetXForwarded leaves them).
+func (f *fixture) viaProxy(req *http.Request) string {
+	f.t.Helper()
+	ln := unixListener(f.t)
+	srv := newServer(NewHandler(f.app))
+	go srv.Serve(ln)
+	f.t.Cleanup(func() { srv.Close() })
+	resp, err := unixClient(ln.Addr().String()).Do(req)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	return string(body)
+}
+
+func TestProxiedPageLivesUnderThePrefix(t *testing.T) {
+	f := newFixture(t)
+	req, _ := http.NewRequest(http.MethodGet, "http://odioctl/", nil)
+	req.Header.Set("X-Forwarded-Prefix", "/admin")
+	req.Header.Set("X-Forwarded-Host", "odio.local:8018")
+	body := f.viaProxy(req)
+	// the odio-ui link is built as on the port, from the forwarded host
+	wants(t, body, `<base href="/admin/">`, "http://odio.local:8018/ui", `sse-connect="events"`)
+}
+
+func TestForwardedHeadersAreIgnoredOnThePort(t *testing.T) {
+	f := newFixture(t)
+	req, _ := http.NewRequest(http.MethodGet, f.srv.URL+"/", nil)
+	req.Host = "odio.local:8021"
+	req.Header.Set("X-Forwarded-Prefix", "/admin")
+	req.Header.Set("X-Forwarded-Host", "evil.example")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	wants(t, string(body), `<base href="/">`, "http://odio.local:8018/ui")
+}
+
+func TestProxiedActionCallsBackToTheForwardedHost(t *testing.T) {
+	f := newFixture(t)
+	f.installQbzd()
+	form := url.Values{"token": {f.app.Token()}, "kind": {"role"}, "name": {"qbzd"}, "action": {"login"}}
+	req, _ := http.NewRequest(http.MethodPost, "http://odioctl/components/action", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("X-Forwarded-Host", "odio.local:8018")
+	req.Header.Set("X-Forwarded-For", "192.0.2.7")
+	f.viaProxy(req)
+	if argv := f.spawns[0]; argv[3] != "odio.local" {
+		t.Errorf("argv = %v", argv)
+	}
+	wants(t, f.logs.String(), "from 192.0.2.7")
+}
+
+func TestPageAttributesAreSeparated(t *testing.T) {
+	f := newFixture(t)
+	f.installQbzd()
+	_, body := f.get("/")
+	wants(t, body, `hx-post="dac"`, `hx-post="components"`)
+	if m := regexp.MustCompile(`="[^"<>]*"[a-z]`).FindString(body); m != "" {
+		t.Errorf("attributes run together: %s", m)
+	}
+}
+
+func TestBasePath(t *testing.T) {
+	for prefix, want := range map[string]string{
+		"":                "/",
+		"/":               "/",
+		"/admin":          "/admin/",
+		"/admin/":         "/admin/",
+		"/a/../admin":     "/admin/",
+		"//evil.example":  "/evil.example/",
+		"admin":           "/",
+		`/admin"><script`: "/",
+		"/ad min":         "/",
+		`/\evil.example`:  "/",
+	} {
+		if got := basePath(prefix); got != want {
+			t.Errorf("basePath(%q) = %q, want %q", prefix, got, want)
+		}
+	}
 }

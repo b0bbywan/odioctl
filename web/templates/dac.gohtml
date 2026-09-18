@@ -2,8 +2,8 @@
 <h2>DAC</h2>
 {{if not .Supported}}<div class="banner warn">No config.txt: not a Raspberry Pi.</div>{{else}}
 <div class="row">
-  <form hx-post="/dac" hx-target="#notice" hx-swap="innerHTML" class="row"><input type="hidden" name="token" value="{{.Token}}"><select name="id">{{range .Options}}<option value="{{.ID}}"{{if .Disabled}} disabled{{end}}{{if .Selected}} selected{{end}}>{{.Text}}</option>{{end}}</select><button class="primary" type="submit">Apply</button></form>
-  {{if .Managed}}<form hx-post="/dac/unset" hx-target="#notice" hx-swap="innerHTML"><input type="hidden" name="token" value="{{.Token}}"><button type="submit">Reset</button></form>{{end}}
+  <form hx-post="dac" hx-target="#notice" hx-swap="innerHTML" class="row"><input type="hidden" name="token" value="{{.Token}}"><select name="id">{{range .Options}}<option value="{{.ID}}"{{if .Disabled}} disabled{{end}}{{if .Selected}} selected{{end}}>{{.Text}}</option>{{end}}</select><button class="primary" type="submit">Apply</button></form>
+  {{if .Managed}}<form hx-post="dac/unset" hx-target="#notice" hx-swap="innerHTML"><input type="hidden" name="token" value="{{.Token}}"><button type="submit">Reset</button></form>{{end}}
 </div>
 <p class="hint">{{.Current}}</p>
 {{if .Stray}}<div class="banner warn">{{.Stray}}</div>{{end}}

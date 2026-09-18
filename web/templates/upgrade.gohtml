@@ -3,5 +3,5 @@
 {{if .Running}}<button class="primary" type="button" disabled>Upgrading…</button>
 {{else if not .Checked}}<div class="banner warn">No upgrade check yet.</div>{{else if not .Available}}<p class="hint">{{.UpToDate}}</p>{{else}}
 <ul class="pending">{{range .Items}}<li>{{.}}</li>{{end}}</ul>
-<form hx-post="/upgrade" hx-target="#notice" hx-swap="innerHTML"><input type="hidden" name="token" value="{{.Token}}"><button class="primary" type="submit">Apply now</button></form>
+<form hx-post="upgrade" hx-target="#notice" hx-swap="innerHTML"><input type="hidden" name="token" value="{{.Token}}"><button class="primary" type="submit">Apply now</button></form>
 {{end}}{{if .Note.Text}}<p class="hint outcome{{if .Note.Failed}} err{{end}}">Upgrade: {{.Note.Text}}</p>{{end}}</section>

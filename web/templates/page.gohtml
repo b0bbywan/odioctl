@@ -4,17 +4,18 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="htmx-config" content='{"responseHandling":[{"code":".*","swap":true}]}'>
+<base href="{{.Base}}">
 <title>odio Settings</title>
-<link rel="icon" type="image/png" href="/static/logo.png">
-<link rel="stylesheet" href="/static/style.css?v={{.Version}}">
-<script src="/static/htmx.min.js?v={{.Version}}"></script>
-<script src="/static/htmx-sse.js?v={{.Version}}"></script>
+<link rel="icon" type="image/png" href="static/logo.png">
+<link rel="stylesheet" href="static/style.css?v={{.Version}}">
+<script src="static/htmx.min.js?v={{.Version}}"></script>
+<script src="static/htmx-sse.js?v={{.Version}}"></script>
 </head>
-<body hx-ext="sse" sse-connect="/events">
+<body hx-ext="sse" sse-connect="events">
 <header>
   <div class="wrap">
     <div class="brand">
-      <a href="{{.UIURL}}" title="odio player"><img src="/static/logo.png" alt="odio logo"></a>
+      <a href="{{.UIURL}}" title="odio player"><img src="static/logo.png" alt="odio logo"></a>
       <div>
         <h1>Settings</h1>
         <p>{{.Hostname}}</p>

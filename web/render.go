@@ -99,9 +99,9 @@ type upgradeView struct {
 }
 
 type pageView struct {
-	Version, UIURL, Hostname string
-	Odios                    string          // "" = no badge
-	Sections                 []template.HTML // each rendered by its own template, in sections order
+	Version, Base, UIURL, Hostname string
+	Odios                          string          // "" = no badge
+	Sections                       []template.HTML // each rendered by its own template, in sections order
 }
 
 // noticeView is the outcome of a POST: its banner, and the modal of an
@@ -388,19 +388,23 @@ func stateOf(app *App) (*state.State, string) {
 }
 
 // RenderPage is GET /: the sections as they stand, an empty #notice and
-// #modal for the POSTs to fill. host is the Host header the browser used.
-func RenderPage(app *App, host string) (string, error) {
+// #modal for the POSTs to fill, every URL relative to the <base> o sets.
+func RenderPage(app *App, o origin) (string, error) {
 	// The Host header when the browser gave one (that name reaches odio), its
 	// own hostname otherwise — same address for the odio-ui link and ssh.
-	hostname := host
+	hostname := o.Host
 	if hostname == "" {
 		hostname, _ = os.Hostname()
 	}
-	uiURL := fmt.Sprintf("http://%s:%d/ui", hostname, OdioUIPort)
+	uiURL := app.Config().UIURL
+	if uiURL == "" {
+		uiURL = fmt.Sprintf("http://%s:%d/ui", hostname, OdioUIPort)
+	}
 	selfName, _ := os.Hostname()
 
 	view := pageView{
 		Version:  config.AppVersion,
+		Base:     o.Base,
 		UIURL:    uiURL,
 		Hostname: selfName,
 	}

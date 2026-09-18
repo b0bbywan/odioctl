@@ -14,6 +14,8 @@ Type=simple
 # ODIOCTL_ODIOS_VERSION=<tag> there points the upgrade check at an odios
 # pre-release instead of the published latest one (a test odio). Both units
 # read it: `odioctl web` refreshes upgrades.json on every component toggle.
+# ODIOCTL_UI_URL=<url> is where the logo leads, when odio-ui is not at
+# http://<host>:8018/ui.
 EnvironmentFile=-/etc/default/odioctl
 ExecStart=/usr/bin/odioctl web --systemd-only
 Restart=on-failure
