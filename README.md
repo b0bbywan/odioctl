@@ -45,8 +45,12 @@ The package ships (not auto-enabled — odios' installer enables them per user):
 |---|---|
 | `/usr/lib/systemd/user/odio-check-upgrade.{service,timer}` | daily `odioctl upgrade check` |
 | `/usr/lib/systemd/user/odio-upgrade.service` | `sudo odioctl upgrade apply --progress` (started by odio-api) |
-| `/usr/lib/systemd/user/odioctl-web.socket` | port 8021 — **this is the unit to enable** |
-| `/usr/lib/systemd/user/odioctl-web.service` | `odioctl web`, started on the first connection |
+| `/usr/lib/systemd/user/odioctl-web.socket` | port 8021, the LAN door |
+| `/usr/lib/systemd/user/odioctl-web-proxy.socket` | `$XDG_RUNTIME_DIR/odioctl-web.sock`, the door odio-api's reverse proxy uses (see [Behind odio-api](#behind-odio-api)) |
+| `/usr/lib/systemd/user/odioctl-web.service` | `odioctl web --systemd-only`, started on the first connection to a socket; never enabled itself |
+
+Enable one socket or both: the service serves those that run and never binds
+anything itself, so a door odios leaves closed stays closed.
 | `/etc/sudoers.d/odioctl` | NOPASSWD for the `odioctl` group: `upgrade apply --progress`, `dac set <id>` (one line per id), `dac unset` |
 
 The postinst creates the `odioctl` system group and leaves it empty; odios adds
@@ -63,7 +67,7 @@ odioctl upgrade verify [--state PATH] [--expected-version TAG]
 odioctl pwa-url
 odioctl components [--state PATH] list [--json] | enable NAME | disable NAME
 odioctl dac list [--json] | status [--json] | set ID [--dry-run] | unset
-odioctl web [--bind 0.0.0.0] [--port 8021] [--state PATH] [--config PATH]
+odioctl web [--bind 0.0.0.0] [--port 8021] [--socket PATH] [--systemd-only] [--ui-url URL] [--state PATH] [--config PATH]
 ```
 
 Exit codes: `check` 0 up to date / 1 upgrades available / 2 error · `apply` 0
@@ -145,11 +149,68 @@ directly (needs `/var/lib/odio` group-writable by `odio`, see below),
 config.txt through `sudo -n odioctl dac …` (needs that user in the `odioctl`
 group).
 
+The logo links to odio-ui at `http://<host>:8018/ui`, `<host>` being the name
+the browser used; `ODIOCTL_UI_URL` in `/etc/default/odioctl` (or `--ui-url`)
+replaces that guess, with an absolute URL or one from the root (`/ui`) — a
+relative one would land under the page's `<base>`.
+
+#### Behind odio-api
+
+odioctl can be served by a reverse proxy, odio-api's `/admin/` being the one it
+is meant for: beside port 8021 while odios moves over, instead of it once done.
+
+- **The door.** `odioctl-web-proxy.socket` listens on
+  `$XDG_RUNTIME_DIR/odioctl-web.sock`, mode 0600: only the target user, whom
+  odio-api runs as, can connect. Without systemd, `--socket PATH` does the same.
+- **What odioctl reads from the proxy**, on that socket only (never on 8021,
+  where anyone could forge them): `X-Forwarded-Prefix` becomes the page's
+  `<base href>` (every URL of the page is relative to it), `X-Forwarded-Host`
+  the host of the odio-ui link and of an action's OAuth callback,
+  `X-Forwarded-For` the address in the log.
+- **What the proxy must do**: strip the prefix from the path, `SetXForwarded()`
+  (Go's `httputil.ReverseProxy`), *set* — not add — `X-Forwarded-Prefix`,
+  since `Rewrite` does not drop a client's own, and pass `/events` through
+  unbuffered (SSE; `ReverseProxy` flushes `text/event-stream` by itself).
+
+**Switching an odio over** (odios' `upgrade` role). Two rules from systemd
+drive the order in live mode: it refuses to start a socket under a service
+that is already running, and a running service keeps the fd of a socket
+stopped under it (the port stays open). So the service is stopped first, and
+the next connection starts it again with exactly the doors that run — on the
+new binary too, which makes the stop a replacement for the "Restart
+odioctl-web" handler. Image mode needs none of it: sockets bind at boot,
+before the service.
+
+1. **Both doors**, while odio-api and odio-ui catch up. Require the odioctl
+   release that ships `odioctl-web-proxy.socket` (`upgrade_odioctl_apt_version`),
+   enable it like `odioctl-web.socket` (`wanted_by: sockets.target`), then:
+   ```sh
+   systemctl --user stop odioctl-web.service
+   systemctl --user start odioctl-web-proxy.socket
+   ```
+   Point odio-api's proxy at the socket, and odio-ui's admin link
+   (`links.admin` in odio-api's `config.yaml.j2`) at `/admin/`. odio-api can
+   show that link only when the socket file exists: it does from the moment the
+   unit runs, without waking `odioctl web`.
+2. **The proxy only.** Swap `odioctl-web.socket` for
+   `odioctl-web-proxy.socket` in `upgrade_services` and the enable task, and on
+   odios already switched:
+   ```sh
+   systemctl --user stop odioctl-web.service
+   systemctl --user disable --now odioctl-web.socket
+   systemctl --user enable --now odioctl-web-proxy.socket
+   ```
+   odioctl is then reachable through odio-api only; `ssh` +
+   `odioctl upgrade apply` stays the way back if odio-api is what broke.
+
 ## Development
 
 ```bash
 make lint test
 go run . web --bind 127.0.0.1 --state /tmp/state.json --config /tmp/config.txt
+# the proxy door: --socket, then speak to it as odio-api would
+go run . web --bind 127.0.0.1 --socket /tmp/odioctl-web.sock --state /tmp/state.json
+curl --unix-socket /tmp/odioctl-web.sock -H 'X-Forwarded-Prefix: /admin' http://odio/
 make deb   # cross-compiles amd64/armhf/arm64 and packages via nfpm
 ```
 
