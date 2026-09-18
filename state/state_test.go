@@ -13,6 +13,9 @@ const validJSON = `{
     "odios": "2026.5.0",
     "install_mode": "image",
     "target_user": "odio",
+    "audioserver": "pipewire",
+    "mpd_music_directory": "/mnt/nas/music",
+    "mpd_conf_path": "",
     "roles": {"mpd": "2026.5.0"},
     "roles_excluded": [],
     "features": ["tidal"],
@@ -37,17 +40,64 @@ func TestCurrentSchemaRoundTrips(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := State{
-		Odios:            "2026.5.0",
-		InstallMode:      "image",
-		TargetUser:       "odio",
-		Roles:            map[string]string{"mpd": "2026.5.0"},
-		RolesExcluded:    []string{},
-		Features:         []string{"tidal"},
-		FeaturesExcluded: []string{},
-		ReleaseHistory:   []string{"2026.5.0"},
+		Odios:             "2026.5.0",
+		InstallMode:       "image",
+		TargetUser:        "odio",
+		Audioserver:       "pipewire",
+		MPDMusicDirectory: "/mnt/nas/music",
+		Roles:             map[string]string{"mpd": "2026.5.0"},
+		RolesExcluded:     []string{},
+		Features:          []string{"tidal"},
+		FeaturesExcluded:  []string{},
+		ReleaseHistory:    []string{"2026.5.0"},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %+v, want %+v", got, want)
+	}
+}
+
+// odios wrote no audioserver before PipeWire was offered: PulseAudio then.
+func TestMissingAudioserverIsPulseAudio(t *testing.T) {
+	raw := strings.Replace(validJSON, `"audioserver": "pipewire",`, "", 1)
+	got, err := Parse([]byte(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Audioserver != PulseAudio {
+		t.Errorf("audioserver = %q", got.Audioserver)
+	}
+}
+
+// Before odioctl wrote the state, the paths were not recorded: install.sh's
+// defaults then, which "" asks for.
+func TestMissingPathsAreUnrecorded(t *testing.T) {
+	raw := strings.Replace(validJSON, `"mpd_music_directory": "/mnt/nas/music",`, "", 1)
+	raw = strings.Replace(raw, `"mpd_conf_path": "",`, "", 1)
+	got, err := Parse([]byte(raw))
+	if err != nil || got.MPDMusicDirectory != "" || got.MPDConfPath != "" {
+		t.Errorf("got %+v, %v", got, err)
+	}
+}
+
+// install.sh splices the paths into its extra-vars JSON, run as root.
+func TestPathsThatCouldEscapeTheExtraVarsAreRejected(t *testing.T) {
+	for _, v := range []string{
+		`music`,                                  // relative
+		`/mnt/x\", \"odios_force_scaffold\": \"`, // a quote closes the JSON string
+		`/mnt/x\\`,                               // an escape
+		`/mnt/x\ny`,                              // a newline
+	} {
+		raw := strings.Replace(validJSON, `"/mnt/nas/music"`, `"`+v+`"`, 1)
+		_, err := Parse([]byte(raw))
+		wantSchemaError(t, err, "mpd_music_directory")
+	}
+}
+
+func TestUnknownAudioserverIsRejected(t *testing.T) {
+	for _, v := range []string{`"alsa"`, `""`} {
+		raw := strings.Replace(validJSON, `"pipewire"`, v, 1)
+		_, err := Parse([]byte(raw))
+		wantSchemaError(t, err, "audioserver")
 	}
 }
 
@@ -103,7 +153,7 @@ func TestReadInvalidJSONFails(t *testing.T) {
 	}
 }
 
-func TestWriteMatchesAnsibleToNiceJSON(t *testing.T) {
+func TestWriteFollowsTheStruct(t *testing.T) {
 	st, err := Parse([]byte(validJSON))
 	if err != nil {
 		t.Fatal(err)
@@ -115,20 +165,23 @@ func TestWriteMatchesAnsibleToNiceJSON(t *testing.T) {
 	}
 	got, _ := os.ReadFile(path)
 	want := `{
-    "features": [
-        "tidal"
-    ],
-    "features_excluded": [],
-    "install_mode": "image",
     "odios": "2026.5.0",
-    "release_history": [
-        "2026.5.0"
-    ],
+    "install_mode": "image",
+    "target_user": "odio",
+    "audioserver": "pipewire",
+    "mpd_music_directory": "/mnt/nas/music",
+    "mpd_conf_path": "",
     "roles": {
         "mpd": "x"
     },
     "roles_excluded": [],
-    "target_user": "odio"
+    "features": [
+        "tidal"
+    ],
+    "features_excluded": [],
+    "release_history": [
+        "2026.5.0"
+    ]
 }
 `
 	if string(got) != want {
@@ -142,8 +195,12 @@ func TestWriteNilSlicesStayReadable(t *testing.T) {
 	if err := Write(path, st); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Read(path); err != nil {
+	got, err := Read(path)
+	if err != nil {
 		t.Errorf("read back: %v", err)
+	}
+	if got.Audioserver != PulseAudio {
+		t.Errorf("audioserver = %q", got.Audioserver)
 	}
 }
 
