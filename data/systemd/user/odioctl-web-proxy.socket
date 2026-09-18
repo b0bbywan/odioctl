@@ -6,7 +6,7 @@ ConditionUser=!@system
 
 [Socket]
 # Beside odioctl-web.socket (port 8021) or instead of it. odio-api (same
-# user) proxies /admin/ here; X-Forwarded-* is only believed on this socket.
+# user) proxies /ui/admin/ here; X-Forwarded-* is only believed on this socket.
 # systemd will not start it under a running odioctl-web.service: stop that
 # first (`stop odioctl-web.service` then `enable --now` this).
 ListenStream=%t/odioctl-web.sock

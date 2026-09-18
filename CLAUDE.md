@@ -156,7 +156,7 @@ since rewritten in Go.
   accent) so both pages on odio feel like one product — keep it in sync,
   no Tailwind. No redirects, no query-string state. Every URL in the
   templates is relative to the page's `<base href>` (never `/…`): odio-api
-  serves the page under `/admin/`. `X-Forwarded-Prefix`/`-Host`/`-For` are
+  serves the page under `/ui/admin/`. `X-Forwarded-Prefix`/`-Host`/`-For` are
   believed on the Unix socket only (`web.originOf`, tagged per connection by
   `markProxied`), never on port 8021, where the page stays as it was.
 - **`components.Action` = a command odio runs for the user**, so nobody
