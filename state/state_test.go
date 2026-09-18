@@ -103,7 +103,7 @@ func TestReadInvalidJSONFails(t *testing.T) {
 	}
 }
 
-func TestWriteMatchesAnsibleToNiceJSON(t *testing.T) {
+func TestWriteFollowsTheStruct(t *testing.T) {
 	st, err := Parse([]byte(validJSON))
 	if err != nil {
 		t.Fatal(err)
@@ -115,20 +115,20 @@ func TestWriteMatchesAnsibleToNiceJSON(t *testing.T) {
 	}
 	got, _ := os.ReadFile(path)
 	want := `{
-    "features": [
-        "tidal"
-    ],
-    "features_excluded": [],
-    "install_mode": "image",
     "odios": "2026.5.0",
-    "release_history": [
-        "2026.5.0"
-    ],
+    "install_mode": "image",
+    "target_user": "odio",
     "roles": {
         "mpd": "x"
     },
     "roles_excluded": [],
-    "target_user": "odio"
+    "features": [
+        "tidal"
+    ],
+    "features_excluded": [],
+    "release_history": [
+        "2026.5.0"
+    ]
 }
 `
 	if string(got) != want {
