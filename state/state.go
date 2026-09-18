@@ -45,19 +45,21 @@ const (
 // `state:"optional"` marks what an earlier odios did not write: Parse keeps
 // the value defaults() gives it.
 type State struct {
-	Odios            string            `json:"odios"`
-	InstallMode      string            `json:"install_mode"`
-	TargetUser       string            `json:"target_user"`
-	Audioserver      string            `json:"audioserver" state:"optional"`
-	Roles            map[string]string `json:"roles"`
-	RolesExcluded    []string          `json:"roles_excluded"`
-	Features         []string          `json:"features"`
-	FeaturesExcluded []string          `json:"features_excluded"`
-	ReleaseHistory   []string          `json:"release_history"`
+	Odios             string            `json:"odios"`
+	InstallMode       string            `json:"install_mode"`
+	TargetUser        string            `json:"target_user"`
+	Audioserver       string            `json:"audioserver" state:"optional"`
+	MPDMusicDirectory string            `json:"mpd_music_directory" state:"optional"` // "" → install.sh's default
+	MPDConfPath       string            `json:"mpd_conf_path" state:"optional"`       // an external MPD's; "" → detected
+	Roles             map[string]string `json:"roles"`
+	RolesExcluded     []string          `json:"roles_excluded"`
+	Features          []string          `json:"features"`
+	FeaturesExcluded  []string          `json:"features_excluded"`
+	ReleaseHistory    []string          `json:"release_history"`
 }
 
 // defaults is what an optional field meant before odios wrote it: PulseAudio
-// was the only server.
+// was the only server, the paths were install.sh's to pick.
 func defaults() State { return State{Audioserver: PulseAudio} }
 
 // keys are State's json names in field order, required the non-optional ones.
@@ -74,8 +76,8 @@ var keys, required = func() (all, required []string) {
 	return all, required
 }()
 
-// SchemaError reports a state.json missing required fields or with the wrong
-// shape.
+// SchemaError reports a state.json (or a run) missing required fields or with
+// the wrong shape.
 type SchemaError struct{ Reason string }
 
 func (e *SchemaError) Error() string { return e.Reason }
@@ -84,9 +86,8 @@ func schemaErrorf(format string, args ...any) error {
 	return &SchemaError{Reason: fmt.Sprintf(format, args...)}
 }
 
-// decode reads b over st (holding the defaults): the required keys must be
-// there and not null, and with a non-nil allowed, nothing else may be. what
-// names the input in errors.
+// decode reads b over st: the required keys must be there and not null, and
+// with a non-nil allowed, nothing else may be. what names the input in errors.
 func decode(b []byte, st *State, what string, required, allowed []string) error {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(b, &fields); err != nil {
@@ -136,7 +137,26 @@ func validate(st State, what string) error {
 		return schemaErrorf("%s field \"audioserver\" must be %q or %q, got %q",
 			what, PulseAudio, PipeWire, st.Audioserver)
 	}
+	for name, v := range map[string]string{
+		"mpd_music_directory": st.MPDMusicDirectory, "mpd_conf_path": st.MPDConfPath,
+	} {
+		if !validPath(v) {
+			return schemaErrorf("%s field %q must be an absolute path without quotes, "+
+				"backslashes or control characters, got %q", what, name, v)
+		}
+	}
 	return nil
+}
+
+// validPath: "" (not recorded) or an absolute path install.sh can splice into
+// its extra-vars JSON — `apply` runs it as root, state.json is group-writable.
+func validPath(s string) bool {
+	if s == "" {
+		return true
+	}
+	return strings.HasPrefix(s, "/") && !strings.ContainsFunc(s, func(r rune) bool {
+		return r == '"' || r == '\\' || r < 0x20 || r == 0x7f
+	})
 }
 
 // Parse decodes and validates state.json content.

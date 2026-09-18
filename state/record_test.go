@@ -15,6 +15,8 @@ const runJSON = `{
     "install_mode": "live",
     "target_user": "odio",
     "audioserver": "pipewire",
+    "mpd_music_directory": "/mnt/nas/music",
+    "mpd_conf_path": "",
     "roles": {"common": "2026.10.0b1", "pipewire": "2026.10.0b1", "mpd": "2026.9.0b2"},
     "roles_excluded": ["pulseaudio", "qbzd"],
     "features": ["mympd"],
@@ -39,9 +41,10 @@ func TestRecordOnAFreshInstall(t *testing.T) {
 	}
 	want := State{
 		Odios: "2026.10.0b1", InstallMode: "live", TargetUser: "odio", Audioserver: PipeWire,
-		Roles:         map[string]string{"common": "2026.10.0b1", "pipewire": "2026.10.0b1", "mpd": "2026.9.0b2"},
-		RolesExcluded: []string{"qbzd"}, // the server not picked was not declined
-		Features:      []string{"mympd"}, FeaturesExcluded: []string{"tidal"},
+		MPDMusicDirectory: "/mnt/nas/music",
+		Roles:             map[string]string{"common": "2026.10.0b1", "pipewire": "2026.10.0b1", "mpd": "2026.9.0b2"},
+		RolesExcluded:     []string{"qbzd"}, // the server not picked was not declined
+		Features:          []string{"mympd"}, FeaturesExcluded: []string{"tidal"},
 		ReleaseHistory: []string{"2026.10.0b1"},
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -100,6 +103,8 @@ func TestRecordRefusesARunItDoesNotUnderstand(t *testing.T) {
 		"history given":   {strings.Replace(runJSON, `"odios"`, `"release_history": [], "odios"`, 1), "release_history"},
 		"bad audioserver": {strings.Replace(runJSON, `"pipewire",`, `"alsa",`, 1), "alsa"},
 		"empty user":      {strings.Replace(runJSON, `"target_user": "odio"`, `"target_user": ""`, 1), "target_user"},
+		"quoted path":     {strings.Replace(runJSON, `"/mnt/nas/music"`, `"/mnt/\"x"`, 1), "mpd_music_directory"},
+		"relative path":   {strings.Replace(runJSON, `"mpd_conf_path": ""`, `"mpd_conf_path": "mpd.conf"`, 1), "mpd_conf_path"},
 		"wrong shape":     {strings.Replace(runJSON, `"mpd": "2026.9.0b2"`, `"mpd": 1`, 1), "roles"},
 	} {
 		path := filepath.Join(t.TempDir(), "state.json")
