@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 
@@ -83,47 +84,57 @@ func schemaErrorf(format string, args ...any) error {
 	return &SchemaError{Reason: fmt.Sprintf(format, args...)}
 }
 
-// decode reads b over st (holding the defaults) once every required key is
-// there and not null.
-func decode(b []byte, st *State) error {
+// decode reads b over st (holding the defaults): the required keys must be
+// there and not null, and with a non-nil allowed, nothing else may be. what
+// names the input in errors.
+func decode(b []byte, st *State, what string, required, allowed []string) error {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(b, &fields); err != nil {
 		var ute *json.UnmarshalTypeError
 		if errors.As(err, &ute) {
-			return schemaErrorf("state.json must be a JSON object")
+			return schemaErrorf("%s must be a JSON object", what)
 		}
 		return err
 	}
-	var missing []string
+	var missing, unknown []string
 	for _, name := range required {
 		if raw, ok := fields[name]; !ok || string(raw) == "null" {
 			missing = append(missing, name)
 		}
 	}
 	if len(missing) > 0 {
-		return schemaErrorf("state.json missing required fields: %s", strings.Join(missing, ", "))
+		return schemaErrorf("%s missing required fields: %s", what, strings.Join(missing, ", "))
+	}
+	for name := range fields {
+		if allowed != nil && !slices.Contains(allowed, name) {
+			unknown = append(unknown, name)
+		}
+	}
+	if len(unknown) > 0 {
+		sort.Strings(unknown)
+		return schemaErrorf("%s has fields this odioctl does not know: %s", what, strings.Join(unknown, ", "))
 	}
 	if err := json.Unmarshal(b, st); err != nil {
 		var ute *json.UnmarshalTypeError
 		if errors.As(err, &ute) {
-			return schemaErrorf("state.json field %q has the wrong shape (want %s)", ute.Field, ute.Type)
+			return schemaErrorf("%s field %q has the wrong shape (want %s)", what, ute.Field, ute.Type)
 		}
 		return err
 	}
-	return validate(*st)
+	return validate(*st, what)
 }
 
-func validate(st State) error {
+func validate(st State, what string) error {
 	for name, v := range map[string]string{
 		"odios": st.Odios, "install_mode": st.InstallMode, "target_user": st.TargetUser,
 	} {
 		if v == "" {
-			return schemaErrorf("state.json field %q must be a non-empty string", name)
+			return schemaErrorf("%s field %q must be a non-empty string", what, name)
 		}
 	}
 	if st.Audioserver != PulseAudio && st.Audioserver != PipeWire {
-		return schemaErrorf("state.json field \"audioserver\" must be %q or %q, got %q",
-			PulseAudio, PipeWire, st.Audioserver)
+		return schemaErrorf("%s field \"audioserver\" must be %q or %q, got %q",
+			what, PulseAudio, PipeWire, st.Audioserver)
 	}
 	return nil
 }
@@ -131,7 +142,7 @@ func validate(st State) error {
 // Parse decodes and validates state.json content.
 func Parse(b []byte) (State, error) {
 	st := defaults()
-	if err := decode(b, &st); err != nil {
+	if err := decode(b, &st, "state.json", required, nil); err != nil {
 		return State{}, err
 	}
 	return st, nil
