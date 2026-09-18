@@ -23,8 +23,9 @@ since rewritten in Go.
   value `defaults()` gives), and a run is the same struct without the history.
   odios' `write_state.yml` pipes what its run installed to `odioctl state
   record` (`state.ParseRun`, strict: a field odioctl does not know is
-  refused), which keeps the release history and the file's 0660; `read_state.yml` reads it back through `odioctl state show`,
-  normalized. The web UI's toggles write it too (`state.Write`).
+  refused), which keeps the release history and the file's 0660 (the postinst
+  owns `/var/lib/odio` 2770 and `/var/cache/odio` 2775, root:odio);
+  `read_state.yml` reads it back through `odioctl state show`, normalized. The web UI's toggles write it too (`state.Write`).
 - **Test seams are explicit**: swappable package vars (`manifest.Fetch`,
   `upgrade.runInstall`, `upgrade.Systemctl`, `dac.RebootFlag`) and injected
   funcs (`web.Runners`).

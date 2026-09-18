@@ -58,6 +58,11 @@ its target user. It is deliberately not the `odio` group, which carries
 state.json access and holds the installing user too: a group that grants reads
 must not also grant passwordless root.
 
+It also owns where state.json and upgrades.json live, re-applied on every
+install: `/var/lib/odio` 2770 root:odio and `/var/cache/odio` 2775 root:odio
+(creating `odio` if odios has not yet). Purging the package removes the cache,
+never `/var/lib/odio`: state.json is not something to regenerate.
+
 ## CLI
 
 ```
