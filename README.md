@@ -73,11 +73,14 @@ odioctl pwa-url
 odioctl components [--state PATH] list [--json] | enable NAME | disable NAME
 odioctl dac list [--json] | status [--json] | set ID [--dry-run] | unset
 odioctl web [--bind 0.0.0.0] [--port 8021] [--socket PATH] [--systemd-only] [--ui-url URL] [--state PATH] [--config PATH]
+odioctl state [--state PATH] record < run.json | show
+odioctl motd [--state PATH]
 ```
 
 Exit codes: `check` 0 up to date / 1 upgrades available / 2 error · `apply` 0
 upgraded (or nothing to do) / 1 install.sh failed / 2 error · `verify` 0 valid /
-1 invalid / 2 state.json missing.
+1 invalid / 2 state.json missing · `state show` 0 shown / 1 refused / 3
+state.json missing · `state record` 0 recorded / 1 write failed / 2 run refused.
 
 ### `upgrade`
 
@@ -86,7 +89,10 @@ with the published manifest (`https://odio.love/manifest.json` or the release
 asset for `--version`), caches the result in `/var/cache/odio/upgrades.json`
 (read by odio-api and odio-motd), and re-runs `install.sh` from the target
 release with `INSTALL_*` derived from the state (opt-outs) and `RUN_*=N` for
-roles whose version did not move (smart upgrade). `--reinstall` re-runs every
+roles whose version did not move (smart upgrade). A re-run never prompts, so
+what install.sh asked at install comes back from the state too: `AUDIOSERVER`,
+`MPD_MUSIC_DIRECTORY`, `MPD_CONF_PATH` (the last two only when recorded, else
+install.sh's defaults). `--reinstall` re-runs every
 role in full. `apply` follows the report `check` wrote: with none on disk there
 is nothing to apply, unless `--force` or `--version` says otherwise. A custom
 `--state` keeps upgrades.json next to it for every subcommand and for `web`.
@@ -105,6 +111,53 @@ upgrades.json, which is group-writable while `apply` curls that URL into bash
 as root. `check` records the tag under `target_tag` because a pre-release names
 itself by version (`2026.7.0rc2-9-gcad916c`) and is published under a tag
 (`pr-84`); `apply` needs the latter.
+
+### `state`
+
+state.json's schema belongs to odioctl; odios reports to it rather than
+writing the file itself.
+
+- **`record`** is what `write_state.yml` calls, as root, with what the run
+  installed on stdin: `odios`, `install_mode`, `target_user`, `audioserver`
+  (`pulseaudio` | `pipewire`), `mpd_music_directory`, `mpd_conf_path` (the
+  effective paths, `""` when install.sh's default or detection applies; absolute,
+  no quotes, backslashes or control characters, since install.sh splices them
+  into its extra-vars run as root), `roles` (name → version), `roles_excluded`,
+  `features`, `features_excluded` — every one of them and nothing else, so an
+  odios newer than this odioctl is refused rather than half-recorded. odioctl
+  appends the release to `release_history`, drops the audio server that was
+  not picked from `roles_excluded` (not picking it is not declining it), and
+  writes the file atomically, mode 0660 (the group comes from `/var/lib/odio`,
+  2770 root:odio). A state.json it cannot read is replaced, history restarting
+  from this run.
+  ```yaml
+  - name: Record state.json
+    ansible.builtin.command: odioctl state record
+    args:
+      stdin: "{{ _odios_run | to_json }}"
+    become: true
+  ```
+- **`show`** prints state.json as odioctl reads it, for `read_state.yml`: what
+  an earlier odios left out is filled in (no `audioserver` is `pulseaudio`).
+  3 means no state.json (a fresh install), 1 one odioctl refuses; 2 is not
+  one of its answers but an odioctl that predates `state show` — the case of
+  every odio upgrading from before it, since `read_state.yml` runs before the
+  `upgrade` role installs the new odioctl.
+
+### `motd`
+
+odio's login banner, what odios' branding role shipped as a shell script: the
+release and, when `check` found one, the upgrade waiting with its per-role
+detail (upgrades.json, read here instead of by a python3 spawned at every
+login), then the PWA link and the warranty line. Always exits 0 — a login
+shell is not the place to fail — and leaves out whatever it cannot read.
+odios keeps only the hook, in the target user's `~/.profile`:
+
+```sh
+case $- in
+    *i*) command -v odioctl >/dev/null && odioctl motd ;;
+esac
+```
 
 ### `components`
 
@@ -167,8 +220,9 @@ relative one would land under the page's `<base>`.
 
 #### Behind odio-api
 
-odioctl can be served by a reverse proxy, odio-api's `/admin/` being the one it
-is meant for: beside port 8021 while odios moves over, instead of it once done.
+odioctl can be served by a reverse proxy, odio-api's `/ui/admin/` (odio-api ≥
+0.17.4) being the one it is meant for: beside port 8021 while odios moves over,
+instead of it once done.
 
 - **The door.** `odioctl-web-proxy.socket` listens on
   `$XDG_RUNTIME_DIR/odioctl-web.sock`, mode 0600: only the target user, whom
@@ -199,10 +253,11 @@ before the service.
    systemctl --user stop odioctl-web.service
    systemctl --user start odioctl-web-proxy.socket
    ```
-   Point odio-api's proxy at the socket, and odio-ui's admin link
-   (`links.admin` in odio-api's `config.yaml.j2`) at `/admin/`. odio-api can
-   show that link only when the socket file exists: it does from the moment the
-   unit runs, without waking `odioctl web`.
+   Point odio-api at the socket: `api.ui.adminSocket:
+   /run/user/<uid>/odioctl-web.sock` in its `config.yaml.j2`, next to
+   `api.ui.admin: ":8021"`. Its admin link goes through `/ui/admin/` while the
+   socket file exists — from the moment the unit runs, without waking
+   `odioctl web` — and falls back to `admin` otherwise.
 2. **The proxy only.** Swap `odioctl-web.socket` for
    `odioctl-web-proxy.socket` in `upgrade_services` and the enable task, and on
    odios already switched:
@@ -221,7 +276,7 @@ make lint test
 go run . web --bind 127.0.0.1 --state /tmp/state.json --config /tmp/config.txt
 # the proxy door: --socket, then speak to it as odio-api would
 go run . web --bind 127.0.0.1 --socket /tmp/odioctl-web.sock --state /tmp/state.json
-curl --unix-socket /tmp/odioctl-web.sock -H 'X-Forwarded-Prefix: /admin' http://odio/
+curl --unix-socket /tmp/odioctl-web.sock -H 'X-Forwarded-Prefix: /ui/admin' http://odio/
 make deb   # cross-compiles amd64/armhf/arm64 and packages via nfpm
 ```
 
