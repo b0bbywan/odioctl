@@ -12,10 +12,12 @@ since rewritten in Go.
   as per-arch `.deb`s on apt.odio.love for a Raspberry Pi appliance (armhf is
   GOARM=6 so one binary runs from the Zero up). Subprocesses (`curl | bash`,
   `sudo -n`, `systemctl --user`) stay exec'd.
-- **No legacy support.** state.json must be the current schema (`state.State`,
-  every field required — `state.Parse` refuses the rest as `*SchemaError`), no
-  backfill of rc1–rc3 shapes, no dpkg reconstruction, no `odio-upgrade` compat
-  CLI. Refuse loudly (exit 2) instead.
+- **No legacy from before odioctl; its own, yes.** Nothing of the
+  `odio-upgrade` era: no backfill of rc1–rc3 shapes, no dpkg reconstruction, no
+  `odio-upgrade` compat CLI — `state.Parse` refuses those as `*SchemaError`
+  (exit 2). But a state.json an earlier odios wrote in odioctl's time is read,
+  what it lacks given the value it meant: a missing `audioserver` is
+  `pulseaudio`, the only server there was.
 - **Test seams are explicit**: swappable package vars (`manifest.Fetch`,
   `upgrade.runInstall`, `upgrade.Systemctl`, `dac.RebootFlag`) and injected
   funcs (`web.Runners`).

@@ -13,6 +13,7 @@ const validJSON = `{
     "odios": "2026.5.0",
     "install_mode": "image",
     "target_user": "odio",
+    "audioserver": "pipewire",
     "roles": {"mpd": "2026.5.0"},
     "roles_excluded": [],
     "features": ["tidal"],
@@ -40,6 +41,7 @@ func TestCurrentSchemaRoundTrips(t *testing.T) {
 		Odios:            "2026.5.0",
 		InstallMode:      "image",
 		TargetUser:       "odio",
+		Audioserver:      "pipewire",
 		Roles:            map[string]string{"mpd": "2026.5.0"},
 		RolesExcluded:    []string{},
 		Features:         []string{"tidal"},
@@ -48,6 +50,26 @@ func TestCurrentSchemaRoundTrips(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %+v, want %+v", got, want)
+	}
+}
+
+// odios wrote no audioserver before PipeWire was offered: PulseAudio then.
+func TestMissingAudioserverIsPulseAudio(t *testing.T) {
+	raw := strings.Replace(validJSON, `"audioserver": "pipewire",`, "", 1)
+	got, err := Parse([]byte(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Audioserver != PulseAudio {
+		t.Errorf("audioserver = %q", got.Audioserver)
+	}
+}
+
+func TestUnknownAudioserverIsRejected(t *testing.T) {
+	for _, v := range []string{`"alsa"`, `""`} {
+		raw := strings.Replace(validJSON, `"pipewire"`, v, 1)
+		_, err := Parse([]byte(raw))
+		wantSchemaError(t, err, "audioserver")
 	}
 }
 
@@ -118,6 +140,7 @@ func TestWriteFollowsTheStruct(t *testing.T) {
     "odios": "2026.5.0",
     "install_mode": "image",
     "target_user": "odio",
+    "audioserver": "pipewire",
     "roles": {
         "mpd": "x"
     },
@@ -142,8 +165,12 @@ func TestWriteNilSlicesStayReadable(t *testing.T) {
 	if err := Write(path, st); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Read(path); err != nil {
+	got, err := Read(path)
+	if err != nil {
 		t.Errorf("read back: %v", err)
+	}
+	if got.Audioserver != PulseAudio {
+		t.Errorf("audioserver = %q", got.Audioserver)
 	}
 }
 
