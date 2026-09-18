@@ -3,11 +3,11 @@ Description=odio Settings web UI (components, upgrade, DAC)
 Documentation=https://github.com/b0bbywan/odioctl
 ConditionUser=!root
 ConditionUser=!@system
-# No [Install]: odioctl-web.socket is what gets enabled, and it pulls this in on
-# the first connection. Requires= keeps a manual `systemctl --user start
-# odioctl-web.service` on the same path instead of binding the port twice.
-Requires=odioctl-web.socket
-After=odioctl-web.socket
+# No [Install]: the sockets are what gets enabled, odioctl-web.socket (port
+# 8021) and/or odioctl-web-proxy.socket (odio-api's reverse proxy), and the
+# first connection to either pulls this in with the fds of those running. No
+# Requires= on one: odios picks the doors. --systemd-only keeps a bare
+# `systemctl --user start` from binding 8021 itself; exit 2 is not retried.
 
 [Service]
 Type=simple
@@ -15,6 +15,7 @@ Type=simple
 # pre-release instead of the published latest one (a test odio). Both units
 # read it: `odioctl web` refreshes upgrades.json on every component toggle.
 EnvironmentFile=-/etc/default/odioctl
-ExecStart=/usr/bin/odioctl web
+ExecStart=/usr/bin/odioctl web --systemd-only
 Restart=on-failure
 RestartSec=2
+RestartPreventExitStatus=2

@@ -1,0 +1,17 @@
+[Unit]
+Description=odio Settings web UI socket for odio-api's reverse proxy
+Documentation=https://github.com/b0bbywan/odioctl
+ConditionUser=!root
+ConditionUser=!@system
+
+[Socket]
+# Beside odioctl-web.socket (port 8021) or instead of it. odio-api (same
+# user) proxies /admin/ here; X-Forwarded-* is only believed on this socket.
+# systemd will not start it under a running odioctl-web.service: stop that
+# first (`stop odioctl-web.service` then `enable --now` this).
+ListenStream=%t/odioctl-web.sock
+SocketMode=0600
+Service=odioctl-web.service
+
+[Install]
+WantedBy=sockets.target

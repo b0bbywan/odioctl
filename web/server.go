@@ -277,51 +277,89 @@ func hostOf(r *http.Request) string {
 	return host
 }
 
-// RunServe serves until SIGTERM/SIGINT, on the socket systemd passed when
-// there is one, binding for itself otherwise.
+// RunServe serves until SIGTERM/SIGINT, on the sockets systemd passed when
+// there are any, binding for itself otherwise.
 func RunServe(stdout, stderr io.Writer, cfg Config) int {
-	ln, err := SystemdListener()
-	switch {
-	case err != nil:
+	lns, err := SystemdListeners()
+	if err != nil {
 		fmt.Fprintf(stderr, "odioctl web: %v\n", err)
 		return 2
-	case ln != nil:
-		port := ln.Addr().(*net.TCPAddr).Port
-		fmt.Fprintf(stdout, "Serving odioctl web UI on the socket passed by systemd (port %d)\n", port)
-	default:
-		if ln, err = net.Listen("tcp", fmt.Sprintf("%s:%d", cfg.Bind, cfg.Port)); err != nil {
-			fmt.Fprintf(stderr, "odioctl web: %v\n", err)
-			return 2
-		}
-		ip := cfg.Bind
-		if ip == "0.0.0.0" || ip == "::" {
-			if ip = netinfo.DefaultRouteIP(); ip == "" {
-				ip = "127.0.0.1"
-			}
-		}
-		fmt.Fprintf(stdout, "Serving odioctl web UI on http://%s:%d\n", ip, cfg.Port)
 	}
-	return serveUntilSignal(stderr, ln, NewHandler(NewApp(cfg, Runners{Log: stderr})))
+	if lns != nil {
+		for _, ln := range lns {
+			fmt.Fprintf(stdout, "Serving odioctl web UI on the socket passed by systemd (%s)\n", describe(ln))
+		}
+	} else if lns, err = bind(stdout, cfg); err != nil {
+		fmt.Fprintf(stderr, "odioctl web: %v\n", err)
+		return 2
+	}
+	return serveUntilSignal(stderr, lns, NewHandler(NewApp(cfg, Runners{Log: stderr})))
 }
 
-func serveUntilSignal(stderr io.Writer, ln net.Listener, h http.Handler) int {
-	// A sleeping phone or a stray `nc` on 8021 must not pin a goroutine and an
-	// fd for the life of the process: bound every phase. Handlers are quick.
-	srv := &http.Server{
-		Handler:           h,
-		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       30 * time.Second,
-		IdleTimeout:       60 * time.Second,
+// bind is RunServe without systemd: the TCP port, and the Unix socket when
+// --socket names one.
+func bind(stdout io.Writer, cfg Config) ([]net.Listener, error) {
+	ln, err := net.Listen("tcp", fmt.Sprintf("%s:%d", cfg.Bind, cfg.Port))
+	if err != nil {
+		return nil, err
 	}
+	ip := cfg.Bind
+	if ip == "0.0.0.0" || ip == "::" {
+		if ip = netinfo.DefaultRouteIP(); ip == "" {
+			ip = "127.0.0.1"
+		}
+	}
+	fmt.Fprintf(stdout, "Serving odioctl web UI on http://%s:%d\n", ip, cfg.Port)
+	lns := []net.Listener{ln}
+	if cfg.Socket != "" {
+		uln, err := listenUnix(cfg.Socket)
+		if err != nil {
+			closeAll(lns)
+			return nil, err
+		}
+		fmt.Fprintf(stdout, "Serving odioctl web UI on %s\n", cfg.Socket)
+		lns = append(lns, uln)
+	}
+	return lns, nil
+}
+
+func describe(ln net.Listener) string {
+	if tcp, ok := ln.Addr().(*net.TCPAddr); ok {
+		return fmt.Sprintf("port %d", tcp.Port)
+	}
+	return ln.Addr().String()
+}
+
+func serveUntilSignal(stderr io.Writer, lns []net.Listener, h http.Handler) int {
+	srv := newServer(h)
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGTERM, syscall.SIGINT)
 	go func() {
 		<-stop
 		_ = srv.Close()
 	}()
-	if err := srv.Serve(ln); !errors.Is(err, http.ErrServerClosed) {
+	// The first listener to stop takes the others with it: a signal, or a
+	// failure that leaves odio with half its doors.
+	done := make(chan error, len(lns))
+	for _, ln := range lns {
+		go func() { done <- srv.Serve(ln) }()
+	}
+	err := <-done
+	_ = srv.Close()
+	if !errors.Is(err, http.ErrServerClosed) {
 		fmt.Fprintf(stderr, "odioctl web: %v\n", err)
 		return 1
 	}
 	return 0
+}
+
+func newServer(h http.Handler) *http.Server {
+	// A sleeping phone or a stray `nc` on 8021 must not pin a goroutine and an
+	// fd for the life of the process: bound every phase. Handlers are quick.
+	return &http.Server{
+		Handler:           h,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
 }

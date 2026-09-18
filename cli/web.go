@@ -13,6 +13,8 @@ func runWeb(stdout, stderr io.Writer, args []string) int {
 	cfg := web.DefaultConfig()
 	fs.StringVar(&cfg.Bind, "bind", cfg.Bind, "address to listen on (default: all)")
 	fs.IntVar(&cfg.Port, "port", cfg.Port, "TCP port")
+	fs.StringVar(&cfg.Socket, "socket", "", "also serve on this Unix socket, for a reverse proxy "+
+		"(ignored when systemd passes the sockets)")
 	fs.StringVar(&cfg.StatePath, "state", state.SystemStatePath, "path to state.json")
 	fs.StringVar(&cfg.ConfigTxt, "config", "", "path to config.txt (default: "+dac.ConfigTxt+"). "+
 		"Dev/test only: the sudoers rule does not admit --config, so DAC changes "+
