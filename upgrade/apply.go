@@ -137,6 +137,16 @@ func buildApplyEnv(w io.Writer, st state.State, version, targetUser string, man 
 	maps.Copy(env, runEnv)
 	env["ODIOS_VERSION"] = version
 	env["TARGET_USER"] = targetUser
+	// install.sh's answers it cannot find again on its own; "" leaves its default.
+	for k, v := range map[string]string{
+		"AUDIOSERVER":         st.Audioserver,
+		"MPD_MUSIC_DIRECTORY": st.MPDMusicDirectory,
+		"MPD_CONF_PATH":       st.MPDConfPath,
+	} {
+		if v != "" {
+			env[k] = v
+		}
+	}
 	if opts.Reinstall {
 		env["ODIOS_FORCE_SCAFFOLD"] = "Y"
 	}
