@@ -1,6 +1,6 @@
 // Package state reads and writes /var/lib/odio/state.json — the record of
-// what odios installed here. Only the current schema is accepted;
-// anything else is a *SchemaError.
+// what odios installed here. The current schema, or what an earlier odios
+// wrote of it (see `state:"optional"`); anything else is a *SchemaError.
 package state
 
 import (
@@ -34,11 +34,20 @@ func UpgradesPathFor(statePath string) string {
 	return filepath.Join(filepath.Dir(statePath), "upgrades.json")
 }
 
+// The audio servers odios installs, one at a time: roles of those names.
+const (
+	PulseAudio = "pulseaudio"
+	PipeWire   = "pipewire"
+)
+
 // State is the schema of state.json, the only place it is spelled out.
+// `state:"optional"` marks what an earlier odios did not write: Parse keeps
+// the value defaults() gives it.
 type State struct {
 	Odios            string            `json:"odios"`
 	InstallMode      string            `json:"install_mode"`
 	TargetUser       string            `json:"target_user"`
+	Audioserver      string            `json:"audioserver" state:"optional"`
 	Roles            map[string]string `json:"roles"`
 	RolesExcluded    []string          `json:"roles_excluded"`
 	Features         []string          `json:"features"`
@@ -46,14 +55,22 @@ type State struct {
 	ReleaseHistory   []string          `json:"release_history"`
 }
 
-// keys are State's json names in field order, every one required.
-var keys = func() (all []string) {
+// defaults is what an optional field meant before odios wrote it: PulseAudio
+// was the only server.
+func defaults() State { return State{Audioserver: PulseAudio} }
+
+// keys are State's json names in field order, required the non-optional ones.
+var keys, required = func() (all, required []string) {
 	t := reflect.TypeFor[State]()
 	for i := range t.NumField() {
-		name, _, _ := strings.Cut(t.Field(i).Tag.Get("json"), ",")
+		f := t.Field(i)
+		name, _, _ := strings.Cut(f.Tag.Get("json"), ",")
 		all = append(all, name)
+		if f.Tag.Get("state") != "optional" {
+			required = append(required, name)
+		}
 	}
-	return all
+	return all, required
 }()
 
 // SchemaError reports a state.json missing required fields or with the wrong
@@ -66,7 +83,8 @@ func schemaErrorf(format string, args ...any) error {
 	return &SchemaError{Reason: fmt.Sprintf(format, args...)}
 }
 
-// decode reads b over st once every key is there and not null.
+// decode reads b over st (holding the defaults) once every required key is
+// there and not null.
 func decode(b []byte, st *State) error {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(b, &fields); err != nil {
@@ -77,7 +95,7 @@ func decode(b []byte, st *State) error {
 		return err
 	}
 	var missing []string
-	for _, name := range keys {
+	for _, name := range required {
 		if raw, ok := fields[name]; !ok || string(raw) == "null" {
 			missing = append(missing, name)
 		}
@@ -103,12 +121,16 @@ func validate(st State) error {
 			return schemaErrorf("state.json field %q must be a non-empty string", name)
 		}
 	}
+	if st.Audioserver != PulseAudio && st.Audioserver != PipeWire {
+		return schemaErrorf("state.json field \"audioserver\" must be %q or %q, got %q",
+			PulseAudio, PipeWire, st.Audioserver)
+	}
 	return nil
 }
 
 // Parse decodes and validates state.json content.
 func Parse(b []byte) (State, error) {
-	var st State
+	st := defaults()
 	if err := decode(b, &st); err != nil {
 		return State{}, err
 	}
@@ -130,8 +152,11 @@ func Write(path string, st State) error {
 }
 
 // complete fills what Parse would refuse on read-back: a nil list or map
-// marshals as null.
+// marshals as null, an empty audioserver is not one.
 func (st State) complete() State {
+	if st.Audioserver == "" {
+		st.Audioserver = defaults().Audioserver
+	}
 	if st.Roles == nil {
 		st.Roles = map[string]string{}
 	}
