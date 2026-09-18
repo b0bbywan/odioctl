@@ -16,10 +16,16 @@ func runState(stdout, stderr io.Writer, args []string) int {
 	}
 	rest := fs.Args()
 	if len(rest) == 0 {
-		fmt.Fprintln(stderr, "usage: odioctl state [--state PATH] record")
+		fmt.Fprintln(stderr, "usage: odioctl state [--state PATH] record|show")
 		return 2
 	}
 	switch rest[0] {
+	case "show":
+		if len(rest) != 1 {
+			fmt.Fprintln(stderr, "usage: odioctl state show")
+			return 2
+		}
+		return state.RunShow(stdout, stderr, *statePath)
 	case "record":
 		if len(rest) != 1 {
 			fmt.Fprintln(stderr, "usage: odioctl state record < run.json")
