@@ -1,7 +1,8 @@
 package state
 
-// `odioctl state record`: odios' write_state.yml hands over what its run
-// installed, odioctl owns the rest — the schema, the history, the file's mode.
+// `odioctl state record|show`: odios' write_state.yml hands over what its run
+// installed, odioctl owns the rest — the schema, the history, the file's
+// mode; read_state.yml gets the state back normalized.
 
 import (
 	"bytes"
@@ -11,6 +12,8 @@ import (
 	"io/fs"
 	"os"
 	"slices"
+
+	"github.com/b0bbywan/odioctl/fsutil"
 )
 
 // FileMode is state.json's side of the contract with odios: /var/lib/odio is
@@ -48,6 +51,28 @@ func Record(prev *State, run State) State {
 	}
 	st.RolesExcluded = slices.DeleteFunc(slices.Clone(run.RolesExcluded), func(r string) bool { return r == other })
 	return st
+}
+
+// RunShow is `odioctl state show`: state.json as odioctl reads it, what an
+// earlier odios left out filled in. 0 shown, 1 refused, 3 missing: 2 is an
+// odioctl too old to know `show`, which must not read as a fresh install.
+func RunShow(stdout, stderr io.Writer, path string) int {
+	st, err := Read(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		fmt.Fprintf(stderr, "odioctl state show: no state.json at %s\n", path)
+		return 3
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "odioctl state show: %v\n", err)
+		return 1
+	}
+	text, err := fsutil.EncodeJSON(st.complete())
+	if err != nil {
+		fmt.Fprintf(stderr, "odioctl state show: %v\n", err)
+		return 1
+	}
+	fmt.Fprint(stdout, text)
+	return 0
 }
 
 // RunRecord is `odioctl state record`: the run on in, state.json written. 2

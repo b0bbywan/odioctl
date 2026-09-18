@@ -113,6 +113,32 @@ func TestRecordRefusesARunItDoesNotUnderstand(t *testing.T) {
 	}
 }
 
+// read_state.yml's view: what an earlier odios left out is filled in.
+func TestShowNormalizesAnEarlierState(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	os.WriteFile(path, []byte(strings.Replace(validJSON, `"audioserver": "pipewire",`, "", 1)), 0o660)
+	var stdout, stderr bytes.Buffer
+	if rc := RunShow(&stdout, &stderr, path); rc != 0 {
+		t.Fatalf("rc = %d, stderr = %q", rc, stderr.String())
+	}
+	st, err := Parse(stdout.Bytes())
+	if err != nil || st.Audioserver != PulseAudio || !strings.Contains(stdout.String(), `"audioserver": "pulseaudio"`) {
+		t.Errorf("got %q, %v", stdout.String(), err)
+	}
+}
+
+func TestShowExitCodes(t *testing.T) {
+	dir := t.TempDir()
+	refused := filepath.Join(dir, "refused.json")
+	os.WriteFile(refused, []byte(`{"odios": "rc3"}`), 0o660)
+	for path, want := range map[string]int{refused: 1, filepath.Join(dir, "none.json"): 3} {
+		var stdout, stderr bytes.Buffer
+		if rc := RunShow(&stdout, &stderr, path); rc != want || stdout.Len() != 0 {
+			t.Errorf("%s: rc = %d, want %d, stdout = %q", filepath.Base(path), rc, want, stdout.String())
+		}
+	}
+}
+
 func TestRecordFailsWhenStateCannotBeRead(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "state.json") // a directory: reading it fails
 	os.Mkdir(dir, 0o700)

@@ -116,15 +116,23 @@ func writeInPlace(path, text string) error {
 	return f.Sync()
 }
 
-// AtomicWriteJSON writes data as indent-4 JSON (maps sort their keys), the
-// shape ansible's to_nice_json produces.
+// AtomicWriteJSON writes data as EncodeJSON renders it.
 func AtomicWriteJSON(path string, data any) error {
+	text, err := EncodeJSON(data)
+	if err != nil {
+		return err
+	}
+	return AtomicWriteText(path, text)
+}
+
+// EncodeJSON renders data as indent-4 JSON, the indent state.json has always had.
+func EncodeJSON(data any) (string, error) {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
 	enc.SetEscapeHTML(false)
 	enc.SetIndent("", "    ")
 	if err := enc.Encode(data); err != nil {
-		return err
+		return "", err
 	}
-	return AtomicWriteText(path, buf.String())
+	return buf.String(), nil
 }
