@@ -31,9 +31,12 @@ since rewritten in Go.
   Re-run it after touching the catalog; `dac/sudoers_test.go` fails on drift.
 - `odioctl web` is **socket-activated**: `odioctl-web.socket` is the unit that
   gets enabled, systemd holds port 8021 and passes it as fd 3 (`sd_listen_fds`,
-  see `web.SystemdListener` — hand-rolled, no go-systemd for fifteen lines).
-  Without `LISTEN_FDS` it binds for itself, so the dev loop and
-  `--bind`/`--port` are unchanged.
+  see `web.SystemdListeners` — hand-rolled, no go-systemd for fifteen lines).
+  `odioctl-web-proxy.socket` is opt-in beside it (odios enables it): a Unix
+  socket at `%t/odioctl-web.sock`, mode 0600, for odio-api's reverse proxy;
+  the service serves every fd it is passed, TCP or Unix. Without
+  `LISTEN_FDS` it binds for itself (`--bind`/`--port`, plus `--socket` for
+  the Unix one), so the dev loop is unchanged.
 - Privilege model: `odioctl web` runs as the odios target user (systemd --user)
   and edits state.json directly; only `config.txt` writes escalate through
   `sudo -n odioctl dac set <id>` / `dac unset`. The reboot the DAC change

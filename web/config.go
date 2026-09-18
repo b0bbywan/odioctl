@@ -21,6 +21,7 @@ const (
 type Config struct {
 	Bind         string
 	Port         int
+	Socket       string // a Unix socket to serve on too, for a reverse proxy; "" → none
 	StatePath    string
 	ConfigTxt    string // "" → dac.ConfigTxt
 	OdioctlBin   string
