@@ -15,6 +15,10 @@ func runWeb(stdout, stderr io.Writer, args []string) int {
 	fs.IntVar(&cfg.Port, "port", cfg.Port, "TCP port")
 	fs.StringVar(&cfg.Socket, "socket", "", "also serve on this Unix socket, for a reverse proxy "+
 		"(ignored when systemd passes the sockets)")
+	fs.BoolVar(&cfg.SystemdOnly, "systemd-only", false, "serve only the sockets systemd passes, "+
+		"exit 2 rather than bind when there are none")
+	fs.StringVar(&cfg.UIURL, "ui-url", cfg.UIURL, "where the logo leads, absolute or from the root "+
+		"(default: $ODIOCTL_UI_URL, else http://<host>:8018/ui)")
 	fs.StringVar(&cfg.StatePath, "state", state.SystemStatePath, "path to state.json")
 	fs.StringVar(&cfg.ConfigTxt, "config", "", "path to config.txt (default: "+dac.ConfigTxt+"). "+
 		"Dev/test only: the sudoers rule does not admit --config, so DAC changes "+

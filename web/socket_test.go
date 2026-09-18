@@ -190,6 +190,66 @@ func TestServeRefusesABrokenHandover(t *testing.T) {
 	}
 }
 
+// Under the units, no socket passed means no door at all, not port 8021.
+func TestSystemdOnlyNeverBinds(t *testing.T) {
+	t.Setenv("LISTEN_PID", "")
+	os.Unsetenv("LISTEN_PID")
+	cfg := DefaultConfig()
+	cfg.SystemdOnly = true
+	cfg.Bind, cfg.Port = "127.0.0.1", 0
+	cfg.Socket = filepath.Join(t.TempDir(), "web.sock")
+	var stdout, stderr bytes.Buffer
+	rc := RunServe(&stdout, &stderr, cfg)
+	if rc != 2 || !strings.Contains(stderr.String(), "systemd passed no socket") || stdout.Len() != 0 {
+		t.Errorf("rc = %d, stdout = %q, stderr = %q", rc, stdout.String(), stderr.String())
+	}
+	if _, err := os.Lstat(cfg.Socket); err == nil {
+		t.Error("--socket was bound anyway")
+	}
+}
+
+func TestBindOpensThePortAndTheSocket(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "web.sock")
+	lns, err := bind(Config{Bind: "127.0.0.1", Port: 0, Socket: path})
+	if err != nil || len(lns) != 2 {
+		t.Fatalf("got %v, %v", lns, err)
+	}
+	defer closeAll(lns)
+	if got := describe(lns[0]); !strings.HasPrefix(got, "http://127.0.0.1:") {
+		t.Errorf("describe(tcp) = %q", got)
+	}
+	if got := describe(lns[1]); got != path {
+		t.Errorf("describe(unix) = %q", got)
+	}
+}
+
+// A socket that cannot be opened takes the port back down: no half-served odio.
+func TestBindIsAllOrNothing(t *testing.T) {
+	blocker := tcpListener(t)
+	port := blocker.Addr().(*net.TCPAddr).Port
+	blocker.Close()
+	_, err := bind(Config{Bind: "127.0.0.1", Port: port, Socket: filepath.Join(t.TempDir(), "no", "such", "dir", "web.sock")})
+	if err == nil {
+		t.Fatal("bound with a socket in a missing directory")
+	}
+	ln, err := net.Listen("tcp", blocker.Addr().String())
+	if err != nil {
+		t.Fatalf("the port was left open: %v", err)
+	}
+	ln.Close()
+}
+
+func TestAPortBoundToAllAddressesIsShownOnOne(t *testing.T) {
+	ln, err := net.Listen("tcp", ":0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	if got := describe(ln); strings.Contains(got, "[::]") || strings.Contains(got, "0.0.0.0") {
+		t.Errorf("describe = %q", got)
+	}
+}
+
 func TestListenUnixReplacesAStaleSocket(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "web.sock")
 	stale, err := net.Listen("unix", path)

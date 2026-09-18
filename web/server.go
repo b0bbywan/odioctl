@@ -6,6 +6,7 @@ package web
 // carries a per-process token so a cross-site HTML form cannot drive odio.
 
 import (
+	"context"
 	"crypto/subtle"
 	"errors"
 	"fmt"
@@ -15,6 +16,8 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"path"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -51,7 +54,7 @@ func NewHandler(app *App) http.Handler {
 }
 
 func (h *handler) page(w http.ResponseWriter, r *http.Request) {
-	body, err := RenderPage(h.app, hostOf(r))
+	body, err := RenderPage(h.app, originOf(r))
 	if err != nil {
 		sendStatus(w, http.StatusInternalServerError, "")
 		return
@@ -200,9 +203,10 @@ func (h *handler) form(action formAction) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		msg, result, err := action(form, hostOf(r))
+		o := originOf(r)
+		msg, result, err := action(form, o.Host)
 		if err != nil {
-			h.app.log.Printf("POST %s from %s: error: %v", r.URL.Path, r.RemoteAddr, err)
+			h.app.log.Printf("POST %s from %s: error: %v", r.URL.Path, o.Remote, err)
 			var ue *UserError
 			if errors.As(err, &ue) {
 				result = ue.Modal
@@ -210,7 +214,7 @@ func (h *handler) form(action formAction) http.HandlerFunc {
 			notice(w, http.StatusOK, "", err.Error(), result)
 			return
 		}
-		h.app.log.Printf("POST %s from %s: %s", r.URL.Path, r.RemoteAddr, msg)
+		h.app.log.Printf("POST %s from %s: %s", r.URL.Path, o.Remote, msg)
 		notice(w, http.StatusOK, msg, "", result)
 	}
 }
@@ -222,7 +226,7 @@ func (h *handler) reboot(w http.ResponseWriter, r *http.Request) {
 	if _, ok := h.checkedForm(w, r); !ok {
 		return
 	}
-	h.app.log.Printf("POST /reboot from %s: rebooting", r.RemoteAddr)
+	h.app.log.Printf("POST /reboot from %s: rebooting", originOf(r).Remote)
 	notice(w, http.StatusOK, "Rebooting — odio will be back soon.", "", nil)
 	if f, ok := w.(http.Flusher); ok {
 		f.Flush()
@@ -235,7 +239,7 @@ func (h *handler) reboot(w http.ResponseWriter, r *http.Request) {
 func (h *handler) checkedForm(w http.ResponseWriter, r *http.Request) (url.Values, bool) {
 	form, err := h.readForm(r)
 	if err != nil {
-		h.app.log.Printf("POST %s from %s: %v", r.URL.Path, r.RemoteAddr, err)
+		h.app.log.Printf("POST %s from %s: %v", r.URL.Path, originOf(r).Remote, err)
 		code := http.StatusOK
 		if errors.Is(err, errBadToken) {
 			code = http.StatusForbidden
@@ -264,10 +268,66 @@ func (h *handler) readForm(r *http.Request) (url.Values, error) {
 	return form, nil
 }
 
-// hostOf is the hostname the client used (for the odio-ui link), without the
-// port.
-func hostOf(r *http.Request) string {
-	host := r.Host
+// origin is how the browser reached odio: on port 8021, or through odio-api's
+// reverse proxy on the Unix socket — the only door whose X-Forwarded-* is
+// believed, since only the target user can connect to it.
+type origin struct {
+	Host   string // the hostname, no port: the odio-ui link, an action's {host}
+	Base   string // the page's <base href>, "/" unless proxied under a prefix
+	Remote string // who, for the log
+}
+
+type viaProxyKey struct{}
+
+// markProxied is the server's ConnContext: it tags the Unix socket's
+// connections for originOf.
+func markProxied(ctx context.Context, c net.Conn) context.Context {
+	if _, ok := c.(*net.UnixConn); ok {
+		return context.WithValue(ctx, viaProxyKey{}, true)
+	}
+	return ctx
+}
+
+func originOf(r *http.Request) origin {
+	o := origin{Host: hostOf(r.Host), Base: "/", Remote: r.RemoteAddr}
+	if proxied, _ := r.Context().Value(viaProxyKey{}).(bool); !proxied {
+		return o
+	}
+	o.Remote = "proxy"
+	if h := lastValue(r.Header.Get("X-Forwarded-Host")); h != "" {
+		o.Host = hostOf(h)
+	}
+	if ip := lastValue(r.Header.Get("X-Forwarded-For")); ip != "" {
+		o.Remote = ip
+	}
+	o.Base = basePath(r.Header.Get("X-Forwarded-Prefix"))
+	return o
+}
+
+// lastValue is the hop nearest to us in a comma-separated X-Forwarded-*.
+func lastValue(v string) string {
+	return strings.TrimSpace(v[strings.LastIndex(v, ",")+1:])
+}
+
+// basePath turns X-Forwarded-Prefix into a <base href>: a clean absolute
+// path of plain characters ending in "/", "/" for anything else. Clean also
+// folds a leading "//", which would point the page's scripts at another host.
+func basePath(prefix string) string {
+	if !strings.HasPrefix(prefix, "/") || strings.ContainsFunc(prefix, notPathChar) {
+		return "/"
+	}
+	if p := path.Clean(prefix); p != "/" {
+		return p + "/"
+	}
+	return "/"
+}
+
+func notPathChar(c rune) bool {
+	return (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && (c < '0' || c > '9') && !strings.ContainsRune("/-._~", c)
+}
+
+// hostOf is a Host header's hostname, without the port.
+func hostOf(host string) string {
 	if strings.HasPrefix(host, "[") { // IPv6 literal
 		return strings.SplitAfter(host, "]")[0]
 	}
@@ -281,53 +341,60 @@ func hostOf(r *http.Request) string {
 // there are any, binding for itself otherwise.
 func RunServe(stdout, stderr io.Writer, cfg Config) int {
 	lns, err := SystemdListeners()
+	source := " (passed by systemd)"
+	if err == nil && lns == nil && cfg.SystemdOnly {
+		// A bare `systemctl start` must not open a door odios left closed.
+		err = errNoSockets
+	}
+	if err == nil && lns == nil {
+		lns, err = bind(cfg)
+		source = ""
+	}
 	if err != nil {
 		fmt.Fprintf(stderr, "odioctl web: %v\n", err)
 		return 2
 	}
-	if lns != nil {
-		for _, ln := range lns {
-			fmt.Fprintf(stdout, "Serving odioctl web UI on the socket passed by systemd (%s)\n", describe(ln))
-		}
-	} else if lns, err = bind(stdout, cfg); err != nil {
-		fmt.Fprintf(stderr, "odioctl web: %v\n", err)
-		return 2
+	for _, ln := range lns {
+		fmt.Fprintf(stdout, "Serving odioctl web UI on %s%s\n", describe(ln), source)
 	}
 	return serveUntilSignal(stderr, lns, NewHandler(NewApp(cfg, Runners{Log: stderr})))
 }
 
-// bind is RunServe without systemd: the TCP port, and the Unix socket when
-// --socket names one.
-func bind(stdout io.Writer, cfg Config) ([]net.Listener, error) {
-	ln, err := net.Listen("tcp", fmt.Sprintf("%s:%d", cfg.Bind, cfg.Port))
+var errNoSockets = errors.New("--systemd-only, but systemd passed no socket: " +
+	"start odioctl-web.socket or odioctl-web-proxy.socket, not the service")
+
+// bind is RunServe without systemd: the TCP port, plus the Unix socket
+// --socket names. All or nothing.
+func bind(cfg Config) ([]net.Listener, error) {
+	tcp, err := net.Listen("tcp", net.JoinHostPort(cfg.Bind, strconv.Itoa(cfg.Port)))
 	if err != nil {
 		return nil, err
 	}
-	ip := cfg.Bind
-	if ip == "0.0.0.0" || ip == "::" {
+	if cfg.Socket == "" {
+		return []net.Listener{tcp}, nil
+	}
+	unix, err := listenUnix(cfg.Socket)
+	if err != nil {
+		_ = tcp.Close()
+		return nil, err
+	}
+	return []net.Listener{tcp, unix}, nil
+}
+
+// describe is where a listener is reached: the socket's path, or a URL —
+// on the LAN address when the port is bound to all of them.
+func describe(ln net.Listener) string {
+	tcp, ok := ln.Addr().(*net.TCPAddr)
+	if !ok {
+		return ln.Addr().String()
+	}
+	ip := tcp.IP.String()
+	if tcp.IP.IsUnspecified() {
 		if ip = netinfo.DefaultRouteIP(); ip == "" {
 			ip = "127.0.0.1"
 		}
 	}
-	fmt.Fprintf(stdout, "Serving odioctl web UI on http://%s:%d\n", ip, cfg.Port)
-	lns := []net.Listener{ln}
-	if cfg.Socket != "" {
-		uln, err := listenUnix(cfg.Socket)
-		if err != nil {
-			closeAll(lns)
-			return nil, err
-		}
-		fmt.Fprintf(stdout, "Serving odioctl web UI on %s\n", cfg.Socket)
-		lns = append(lns, uln)
-	}
-	return lns, nil
-}
-
-func describe(ln net.Listener) string {
-	if tcp, ok := ln.Addr().(*net.TCPAddr); ok {
-		return fmt.Sprintf("port %d", tcp.Port)
-	}
-	return ln.Addr().String()
+	return "http://" + net.JoinHostPort(ip, strconv.Itoa(tcp.Port))
 }
 
 func serveUntilSignal(stderr io.Writer, lns []net.Listener, h http.Handler) int {
@@ -358,6 +425,7 @@ func newServer(h http.Handler) *http.Server {
 	// fd for the life of the process: bound every phase. Handlers are quick.
 	return &http.Server{
 		Handler:           h,
+		ConnContext:       markProxied,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		IdleTimeout:       60 * time.Second,

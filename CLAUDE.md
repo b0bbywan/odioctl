@@ -29,14 +29,16 @@ since rewritten in Go.
 - **`data/sudoers/odioctl` is generated** from `dac.Catalog` by
   `go generate ./dac` (one explicit line per DAC id, no wildcards).
   Re-run it after touching the catalog; `dac/sudoers_test.go` fails on drift.
-- `odioctl web` is **socket-activated**: `odioctl-web.socket` is the unit that
-  gets enabled, systemd holds port 8021 and passes it as fd 3 (`sd_listen_fds`,
+- `odioctl web` is **socket-activated**: the sockets are the units that get
+  enabled, and systemd passes those running from fd 3 on (`sd_listen_fds`,
   see `web.SystemdListeners` — hand-rolled, no go-systemd for fifteen lines).
-  `odioctl-web-proxy.socket` is opt-in beside it (odios enables it): a Unix
+  `odioctl-web.socket` holds port 8021, `odioctl-web-proxy.socket` a Unix
   socket at `%t/odioctl-web.sock`, mode 0600, for odio-api's reverse proxy;
-  the service serves every fd it is passed, TCP or Unix. Without
-  `LISTEN_FDS` it binds for itself (`--bind`/`--port`, plus `--socket` for
-  the Unix one), so the dev loop is unchanged.
+  odios enables one or both, and is moving to the proxy alone. The service
+  has no `Requires=` on either and runs `--systemd-only`: with no fd passed
+  it exits 2 instead of binding, so a bare `systemctl start` cannot reopen
+  8021. Without that flag it binds for itself (`--bind`/`--port`, plus
+  `--socket` for the Unix one), so the dev loop is unchanged.
 - Privilege model: `odioctl web` runs as the odios target user (systemd --user)
   and edits state.json directly; only `config.txt` writes escalate through
   `sudo -n odioctl dac set <id>` / `dac unset`. The reboot the DAC change
@@ -129,7 +131,11 @@ since rewritten in Go.
   models only, escaping is the engine's), styling in `web/static/style.css`
   which hand-mirrors odio-ui's look (go-odio-api: forest zinc palette, lime
   accent) so both pages on odio feel like one product — keep it in sync,
-  no Tailwind. No redirects, no query-string state.
+  no Tailwind. No redirects, no query-string state. Every URL in the
+  templates is relative to the page's `<base href>` (never `/…`): odio-api
+  serves the page under `/admin/`. `X-Forwarded-Prefix`/`-Host`/`-For` are
+  believed on the Unix socket only (`web.originOf`, tagged per connection by
+  `markProxied`), never on port 8021, where the page stays as it was.
 - **`components.Action` = a command odio runs for the user**, so nobody
   needs a shell on it. `Argv` lives in the catalog and is never built from the
   request — only `{host}` (the name the browser reached odio by, so an
