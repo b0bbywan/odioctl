@@ -14,6 +14,8 @@ const validJSON = `{
     "install_mode": "image",
     "target_user": "odio",
     "audioserver": "pipewire",
+    "mpd_music_directory": "/mnt/nas/music",
+    "mpd_conf_path": "",
     "roles": {"mpd": "2026.5.0"},
     "roles_excluded": [],
     "features": ["tidal"],
@@ -38,15 +40,16 @@ func TestCurrentSchemaRoundTrips(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := State{
-		Odios:            "2026.5.0",
-		InstallMode:      "image",
-		TargetUser:       "odio",
-		Audioserver:      "pipewire",
-		Roles:            map[string]string{"mpd": "2026.5.0"},
-		RolesExcluded:    []string{},
-		Features:         []string{"tidal"},
-		FeaturesExcluded: []string{},
-		ReleaseHistory:   []string{"2026.5.0"},
+		Odios:             "2026.5.0",
+		InstallMode:       "image",
+		TargetUser:        "odio",
+		Audioserver:       "pipewire",
+		MPDMusicDirectory: "/mnt/nas/music",
+		Roles:             map[string]string{"mpd": "2026.5.0"},
+		RolesExcluded:     []string{},
+		Features:          []string{"tidal"},
+		FeaturesExcluded:  []string{},
+		ReleaseHistory:    []string{"2026.5.0"},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %+v, want %+v", got, want)
@@ -62,6 +65,31 @@ func TestMissingAudioserverIsPulseAudio(t *testing.T) {
 	}
 	if got.Audioserver != PulseAudio {
 		t.Errorf("audioserver = %q", got.Audioserver)
+	}
+}
+
+// Before odioctl wrote the state, the paths were not recorded: install.sh's
+// defaults then, which "" asks for.
+func TestMissingPathsAreUnrecorded(t *testing.T) {
+	raw := strings.Replace(validJSON, `"mpd_music_directory": "/mnt/nas/music",`, "", 1)
+	raw = strings.Replace(raw, `"mpd_conf_path": "",`, "", 1)
+	got, err := Parse([]byte(raw))
+	if err != nil || got.MPDMusicDirectory != "" || got.MPDConfPath != "" {
+		t.Errorf("got %+v, %v", got, err)
+	}
+}
+
+// install.sh splices the paths into its extra-vars JSON, run as root.
+func TestPathsThatCouldEscapeTheExtraVarsAreRejected(t *testing.T) {
+	for _, v := range []string{
+		`music`,                                  // relative
+		`/mnt/x\", \"odios_force_scaffold\": \"`, // a quote closes the JSON string
+		`/mnt/x\\`,                               // an escape
+		`/mnt/x\ny`,                              // a newline
+	} {
+		raw := strings.Replace(validJSON, `"/mnt/nas/music"`, `"`+v+`"`, 1)
+		_, err := Parse([]byte(raw))
+		wantSchemaError(t, err, "mpd_music_directory")
 	}
 }
 
@@ -141,6 +169,8 @@ func TestWriteFollowsTheStruct(t *testing.T) {
     "install_mode": "image",
     "target_user": "odio",
     "audioserver": "pipewire",
+    "mpd_music_directory": "/mnt/nas/music",
+    "mpd_conf_path": "",
     "roles": {
         "mpd": "x"
     },
