@@ -109,7 +109,7 @@ state.json are always accepted, even if newer than this odioctl.
 
 ### `dac`
 
-Owns one marked block at the end of `/boot/firmware/config.txt`:
+Owns one marked block, first in `/boot/firmware/config.txt`:
 
 ```
 # BEGIN odioctl dac -- managed block, edit with `odioctl dac`
@@ -118,6 +118,12 @@ dtparam=audio=off
 dtoverlay=hifiberry-dacplus-std
 # END odioctl dac
 ```
+
+First, because the file's own overlays have to come after it: `vc4-kms-v3d`
+disables snd_bcm2835's legacy HDMI card, so an `audio=on` landing after that
+overlay brings the dead card back — two "Built-in Audio Stereo", PulseAudio
+picking the wrong one and hanging on `vchi message timeout`. Being first is
+also what leaves `dtparam=` on the base DTB, no overlay being open yet.
 
 Pre-existing top-level audio lines — a `dtparam=audio=` or an overlay the
 catalog lists — are commented out with an `#odioctl-disabled: ` prefix and
