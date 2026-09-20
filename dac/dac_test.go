@@ -88,7 +88,7 @@ func TestManagedBlockWinsOverOutside(t *testing.T) {
 	}
 }
 
-func TestApplyAppendsBlockAndDisablesStrayLines(t *testing.T) {
+func TestApplyPutsTheBlockFirstAndDisablesStrayLines(t *testing.T) {
 	out := Apply(fixture, entry(t, "hifiberry-dacplus-std"))
 	if !strings.Contains(out, DisabledPrefix+"dtparam=audio=on") {
 		t.Error("audio=on not disabled")
@@ -97,11 +97,11 @@ func TestApplyAppendsBlockAndDisablesStrayLines(t *testing.T) {
 		t.Error("audio=on still active")
 	}
 	lines := strings.Split(strings.TrimSuffix(out, "\n"), "\n")
-	tail := lines[len(lines)-6:]
-	want := []string{Begin, "[all]", "dtoverlay=", "dtparam=audio=off",
-		"dtoverlay=hifiberry-dacplus-std", End}
-	if !slices.Equal(tail, want) {
-		t.Errorf("tail = %v", tail)
+	head := lines[:6]
+	want := []string{Begin, "[all]", "dtparam=audio=off",
+		"dtoverlay=hifiberry-dacplus-std", End, ""}
+	if !slices.Equal(head, want) {
+		t.Errorf("head = %v", head)
 	}
 	if !strings.HasSuffix(out, "\n") {
 		t.Error("missing final newline")
@@ -132,30 +132,25 @@ func TestOnboardSetsAudioOnWithoutOverlay(t *testing.T) {
 	if !strings.Contains(block, "dtparam=audio=on") {
 		t.Error("audio should be on")
 	}
-	var overlays []string
-	for _, ln := range strings.Split(block, "\n") {
-		if strings.Contains(ln, "dtoverlay") {
-			overlays = append(overlays, ln)
-		}
-	}
-	if !slices.Equal(overlays, []string{"dtoverlay="}) {
-		t.Errorf("overlays = %v", overlays) // only the reset, never an overlay
+	block, _, _ = strings.Cut(block, End)
+	if strings.Contains(block, "dtoverlay") {
+		t.Errorf("onboard block carries an overlay: %q", block)
 	}
 }
 
-func TestAudioParamIsTargetedAtTheBaseDTB(t *testing.T) {
-	// A `dtparam=` applies to the overlay loaded above it, so the reset must
-	// come between the last `dtoverlay=` of the file and our `dtparam=audio=`.
+// vc4-kms-v3d disables snd_bcm2835's legacy HDMI card; an audio=on landing
+// after it brings that dead card back, so our block goes first — which is
+// also what leaves `dtparam=` on the base DTB, no overlay being open yet.
+func TestAudioParamComesBeforeTheFilesOverlays(t *testing.T) {
 	for _, id := range []string{Onboard, "hifiberry-dacplus-std"} {
 		out := Apply(fixture+"dtoverlay=vc4-kms-v3d\n", entry(t, id))
 		lines := strings.Split(out, "\n")
+		audio := slices.IndexFunc(lines, func(l string) bool {
+			return strings.HasPrefix(l, "dtparam=audio=")
+		})
 		vc4 := slices.Index(lines, "dtoverlay=vc4-kms-v3d")
-		reset := slices.Index(lines, "dtoverlay=")
-		if vc4 < 0 || reset < 0 || vc4 >= reset {
-			t.Errorf("%s: vc4 at %d, reset at %d", id, vc4, reset)
-		}
-		if !strings.HasPrefix(lines[reset+1], "dtparam=audio=") {
-			t.Errorf("%s: audio param not right below the reset", id)
+		if lines[0] != Begin || audio < 0 || vc4 < 0 || audio >= vc4 {
+			t.Errorf("%s: first = %q, audio at %d, vc4 at %d", id, lines[0], audio, vc4)
 		}
 	}
 }

@@ -1,17 +1,19 @@
 // Package dac manages the `dtoverlay=` line in the Raspberry Pi config.txt.
 //
-// odioctl owns one marked block at the end of config.txt:
+// odioctl owns one marked block, first in config.txt:
 //
 //	# BEGIN odioctl dac -- managed block, edit with `odioctl dac`
 //	[all]
-//	dtoverlay=
 //	dtparam=audio=off
 //	dtoverlay=hifiberry-dacplus-std
 //	# END odioctl dac
 //
-// [all] resets any open [pi4]-style filter section, the empty `dtoverlay=`
-// retargets `dtparam=` at the base DTB, and stray audio lines are commented
-// out with DisabledPrefix so `dac unset` restores them. Writing needs root.
+// First, because the file's overlays must come after: `vc4-kms-v3d` disables
+// snd_bcm2835's legacy HDMI card, and an `audio=on` landing after it brings
+// that dead card back (PulseAudio then picks it — vchi timeouts). It is also
+// what puts `dtparam=` on the base DTB, no overlay being open yet. [all]
+// resets any filter section, and stray audio lines are commented out with
+// DisabledPrefix so `dac unset` restores them. Writing needs root.
 package dac
 
 import (
@@ -33,12 +35,8 @@ const ConfigTxt = "/boot/firmware/config.txt"
 var RebootFlag = "/run/odioctl/reboot-required"
 
 const (
-	Begin = "# BEGIN odioctl dac -- managed block, edit with `odioctl dac`"
-	End   = "# END odioctl dac"
-	// An empty `dtoverlay=` ends the parameter list of the overlay above it:
-	// without this reset our `dtparam=audio=` would land on whatever the file
-	// loaded last instead of the base DTB, and snd_bcm2835 never loads.
-	overlayReset   = "dtoverlay="
+	Begin          = "# BEGIN odioctl dac -- managed block, edit with `odioctl dac`"
+	End            = "# END odioctl dac"
 	DisabledPrefix = "#odioctl-disabled: "
 
 	Onboard = "onboard"
@@ -236,16 +234,21 @@ func renderBlock(e Entry) []string {
 	if e.ID == Onboard {
 		audio = "on"
 	}
-	lines := []string{Begin, "[all]", overlayReset, "dtparam=audio=" + audio}
+	lines := []string{Begin, "[all]", "dtparam=audio=" + audio}
 	if dto := e.OverlayLine(); dto != "" {
 		lines = append(lines, dto)
 	}
 	return append(lines, End)
 }
 
-func stripTrailingBlank(lines []string) []string {
+// trimBlank drops blank lines at both ends: the block is followed by one
+// blank line of its own, and removing it must not leave a gap behind.
+func trimBlank(lines []string) []string {
 	for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
 		lines = lines[:len(lines)-1]
+	}
+	for len(lines) > 0 && strings.TrimSpace(lines[0]) == "" {
+		lines = lines[1:]
 	}
 	return lines
 }
@@ -261,12 +264,12 @@ func Apply(text string, e Entry) string {
 			body = append(body, line)
 		}
 	}
-	body = stripTrailingBlank(body)
+	body = trimBlank(body)
+	lines := renderBlock(e)
 	if len(body) > 0 {
-		body = append(body, "")
+		lines = append(lines, "")
 	}
-	body = append(body, renderBlock(e)...)
-	return strings.Join(body, "\n") + "\n"
+	return strings.Join(append(lines, body...), "\n") + "\n"
 }
 
 // Unapply returns config.txt text with the managed block removed and disabled
@@ -277,7 +280,7 @@ func Unapply(text string) string {
 	for _, line := range slices.Concat(before, after) {
 		body = append(body, strings.TrimPrefix(line, DisabledPrefix))
 	}
-	body = stripTrailingBlank(body)
+	body = trimBlank(body)
 	if len(body) == 0 {
 		return ""
 	}
