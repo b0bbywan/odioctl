@@ -22,6 +22,7 @@ commands:
   dac          select the DAC overlay in config.txt
   web          serve the local web UI
   state        record what an odios run installed / show state.json (for odios)
+  motd         print the login banner (odios hooks it into ~/.profile)
 `
 
 // Run dispatches argv (without the program name) and returns the exit code.
@@ -49,6 +50,8 @@ func Run(stdout, stderr io.Writer, argv []string) int {
 		return runWeb(stdout, stderr, argv[1:])
 	case "state":
 		return runState(stdout, stderr, argv[1:])
+	case "motd":
+		return runMOTD(stdout, stderr, argv[1:])
 	default:
 		fmt.Fprintf(stderr, "odioctl: unknown command %q\n%s", argv[0], usageText)
 		return 2

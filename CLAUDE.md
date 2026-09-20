@@ -30,6 +30,10 @@ since rewritten in Go.
   never prompts, so `apply` hands install.sh back what it asked at install
   (`AUDIOSERVER`, `MPD_MUSIC_DIRECTORY`, `MPD_CONF_PATH`); the paths end up in
   its extra-vars JSON run as root, hence `state.validPath` on both sides.
+- **The login banner is `odioctl motd`**, not odios' shell script: it reads
+  upgrades.json through `upgrade.ReadReport` like everything else, where the
+  script spawned a python3 at every login. odios keeps only the `~/.profile`
+  hook. It never fails (exit 0): what is missing is left out.
 - **Test seams are explicit**: swappable package vars (`manifest.Fetch`,
   `upgrade.runInstall`, `upgrade.Systemctl`, `dac.RebootFlag`) and injected
   funcs (`web.Runners`).
@@ -188,7 +192,8 @@ make deb     # cross-compiles amd64/armhf/arm64 and packages via nfpm
 ## Layout
 
 `versions`, `state`, `manifest`, `netinfo`, `fsutil`, `procutil`, `components`,
-`dac` (+ `dac/gen`, the sudoers generator), `upgrade` (check/apply/verify), `web`
+`dac` (+ `dac/gen`, the sudoers generator), `upgrade` (check/apply/verify),
+`motd` (the login banner), `web`
 (config, app — what the handlers hold — and one file per thing that lives
 between requests: changes, actions, upgrades; components and dac for the
 writes; render, server, socket + `templates/`, `static/`),
