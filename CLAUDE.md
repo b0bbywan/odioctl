@@ -26,6 +26,11 @@ since rewritten in Go.
   `dac.RunSet`, `components.RunList`).
 - **Keep stdout strings of `upgrade apply/check` stable** — odios CI greps
   them (`smart-upgrade: …`, `Upgrading to … via …`, `(dry-run, not invoking)`).
+- **The DAC block goes first in config.txt**, before the file's own overlays:
+  `vc4-kms-v3d` disables snd_bcm2835's legacy HDMI card, and a `dtparam=audio=on`
+  after it brings that dead card back for PulseAudio to pick (vchi timeouts).
+  Being first also puts `dtparam=` on the base DTB, which the old trailing
+  block needed an empty `dtoverlay=` reset for.
 - **`data/sudoers/odioctl` is generated** from `dac.Catalog` by
   `go generate ./dac` (one explicit line per DAC id, no wildcards).
   Re-run it after touching the catalog; `dac/sudoers_test.go` fails on drift.
