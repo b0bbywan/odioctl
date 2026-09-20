@@ -287,6 +287,20 @@ func Unapply(text string) string {
 	return strings.Join(body, "\n") + "\n"
 }
 
+// WouldChange reports whether selecting e would rewrite path. The file
+// decides, not the id: a block of an older layout carrying the same id still
+// has to be moved.
+func WouldChange(path string, e Entry) (bool, error) {
+	if path == "" {
+		path = ConfigTxt
+	}
+	text, err := ReadConfig(path)
+	if err != nil {
+		return false, err
+	}
+	return Apply(text, e) != text, nil
+}
+
 func isFile(path string) bool {
 	fi, err := os.Stat(path)
 	return err == nil && fi.Mode().IsRegular()

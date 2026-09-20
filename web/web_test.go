@@ -957,6 +957,23 @@ func TestDacReapplyingTheCurrentSelectionIsANoOp(t *testing.T) {
 	}
 }
 
+// A block odioctl wrote in an older layout (at the end, with the overlay
+// reset) carries the same id: Apply must still move it, or the page can
+// never repair a config.txt whose audio line lands after vc4-kms-v3d.
+func TestDacSameIdInAnOlderLayoutStillApplies(t *testing.T) {
+	f := newFixture(t)
+	stale := configFixture + "\n" + dac.Begin + "\n[all]\ndtoverlay=\ndtparam=audio=on\n" + dac.End + "\n"
+	if err := os.WriteFile(f.configPath, []byte(stale), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, body := f.post("/dac", url.Values{"id": {"onboard"}}, true)
+	wants(t, body, "DAC set to onboard")
+	text, _ := dac.ReadConfig(f.configPath)
+	if !strings.HasPrefix(text, dac.Begin) || strings.Contains(text, "\ndtoverlay=\n") {
+		t.Errorf("block not rewritten:\n%s", text)
+	}
+}
+
 func TestDacSameIdOverUnmanagedConfigStillApplies(t *testing.T) {
 	// config.txt says audio=on (current: onboard) but odioctl owns nothing
 	// yet: applying "onboard" must take ownership of the block.

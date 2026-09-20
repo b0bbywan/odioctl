@@ -4,13 +4,15 @@ import "github.com/b0bbywan/odioctl/dac"
 
 // SetDAC escalates through `sudo -n odioctl dac set <id>`.
 func (a *App) SetDAC(id string) (string, error) {
-	if _, ok := dac.ByID(id); !ok {
+	entry, ok := dac.ByID(id)
+	if !ok {
 		return "", userErrorf("unknown DAC id %q", id)
 	}
 	// Re-applying the current selection is one click away, so catch the no-op
-	// rather than claim a reboot nothing needs — but only over a block we
-	// already own: the same id takes ownership of an unmanaged config.txt.
-	if d := a.DacStatus(); d.Managed && d.Current == id {
+	// rather than claim a reboot nothing needs. What config.txt would become
+	// decides, not the id: a block odioctl wrote in an older layout carries
+	// the same id and still has to be rewritten. Unreadable: let sudo judge.
+	if changed, err := dac.WouldChange(a.cfg.ConfigTxt, entry); err == nil && !changed {
 		return "DAC already set to " + id + " — nothing to apply.", nil
 	}
 	if err := a.runDac("dac", "set", id); err != nil {
