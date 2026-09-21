@@ -69,11 +69,22 @@ func DeriveInstallEnv(st state.State) map[string]string {
 	return env
 }
 
+var audioservers = []string{state.PulseAudio, state.PipeWire}
+
+// switchingAudioserver: another server than the picked one is installed. Every
+// role built on the server follows it, so none may be skipped.
+func switchingAudioserver(st state.State) bool {
+	if st.Roles[st.Audioserver] != "" {
+		return false
+	}
+	return slices.ContainsFunc(audioservers, func(s string) bool { return st.Roles[s] != "" })
+}
+
 // DeriveRunEnv emits RUN_X=N for roles already at the target version and not
 // needed by a pending install: RUN_X is an internal optimisation, INSTALL_X the API.
 func DeriveRunEnv(st state.State, man *manifest.Manifest, installEnv map[string]string) map[string]string {
 	env := map[string]string{}
-	if man == nil {
+	if man == nil || switchingAudioserver(st) {
 		return env
 	}
 	mustRun := components.PendingRuns(st, man)
@@ -169,6 +180,8 @@ func buildApplyEnv(w io.Writer, st state.State, version, targetUser string, man 
 	switch {
 	case opts.Reinstall:
 		fmt.Fprintln(w, "  reinstall: running all roles with full scaffold")
+	case switchingAudioserver(st):
+		fmt.Fprintf(w, "  smart-upgrade: switching the audio server to %s, running everything\n", st.Audioserver)
 	case len(skipped) > 0:
 		fmt.Fprintf(w, "  smart-upgrade: skipping unchanged roles: %s\n", strings.Join(skipped, ", "))
 	case man == nil:

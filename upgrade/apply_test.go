@@ -238,6 +238,29 @@ func TestBuildApplyEnvSkipsUnchangedRoles(t *testing.T) {
 	}
 }
 
+// mpd, bluetooth & co. carry the server's backend: a switch re-runs them all.
+func TestBuildApplyEnvAudioserverSwitch(t *testing.T) {
+	current := map[string]string{"pulseaudio": "2026.5.0", "mpd": "2026.5.0"}
+	st := makeState()
+	st.Roles = maps.Clone(current)
+	st.Features = []string{"mympd"}
+	m := runManifest(current)
+	if env, _ := applyEnv(t, st, ApplyOptions{}, m); env["RUN_MPD"] != "N" || env["RUN_PULSEAUDIO"] != "N" {
+		t.Fatalf("no switch: env = %v", env)
+	}
+	st.Audioserver = state.PipeWire
+	env, out := applyEnv(t, st, ApplyOptions{}, m)
+	for k := range env {
+		if strings.HasPrefix(k, "RUN_") {
+			t.Errorf("switch: %s = %s", k, env[k])
+		}
+	}
+	if env["AUDIOSERVER"] != "pipewire" ||
+		!strings.Contains(out, "smart-upgrade: switching the audio server to pipewire") {
+		t.Errorf("env = %v, out = %q", env, out)
+	}
+}
+
 func TestBuildApplyEnvNoManifest(t *testing.T) {
 	st := makeState()
 	st.Odios = "2026.4.0"

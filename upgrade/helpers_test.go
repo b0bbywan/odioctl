@@ -14,6 +14,7 @@ func makeState() state.State {
 		Odios:            "2026.5.0",
 		InstallMode:      "image",
 		TargetUser:       "odio",
+		Audioserver:      state.PulseAudio,
 		Roles:            map[string]string{},
 		RolesExcluded:    []string{},
 		Features:         []string{},
