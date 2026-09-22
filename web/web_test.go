@@ -66,7 +66,7 @@ func newFixture(t *testing.T) *fixture {
 	t.Helper()
 	f := &fixture{t: t, dir: t.TempDir(), userRan: make(chan []string, 16)}
 	f.statePath = filepath.Join(f.dir, "state.json")
-	f.writeRoles(map[string]string{"mpd": "1", "common": "1"})
+	f.writeRoles(map[string]string{"mpd": "1", "common": "1", "spotifyd": "1"})
 	f.configPath = filepath.Join(f.dir, "config.txt")
 	if err := os.WriteFile(f.configPath, []byte(configFixture), 0o644); err != nil {
 		t.Fatal(err)
@@ -78,7 +78,8 @@ func newFixture(t *testing.T) *fixture {
 	// No network: `upgrade.Refresh` after a toggle sees this manifest.
 	oldFetch := manifest.Fetch
 	manifest.Fetch = func(string) (*manifest.Manifest, error) {
-		return &manifest.Manifest{Odios: "2026.5.0", Roles: map[string]string{"mpd": "1", "common": "1", "qbzd": "1"}}, nil
+		return &manifest.Manifest{Odios: "2026.5.0",
+			Roles: map[string]string{"mpd": "1", "common": "1", "qbzd": "1", "spotifyd": "1"}}, nil
 	}
 	t.Cleanup(func() { manifest.Fetch = oldFetch })
 
@@ -333,22 +334,22 @@ func TestWrongVerbIs405(t *testing.T) {
 func TestDisableAndEnableRole(t *testing.T) {
 	f := newFixture(t)
 	code, body := f.post("/components", url.Values{
-		"kind": {"role"}, "name": {"mpd"}, "enabled": {"0"},
+		"kind": {"role"}, "name": {"spotifyd"}, "enabled": {"0"},
 	}, true)
 	if code != 200 {
 		t.Fatalf("code = %d", code)
 	}
-	wants(t, body, "MPD disabled")
+	wants(t, body, "Spotify Connect disabled")
 	st := f.state()
-	if _, ok := st.Roles["mpd"]; ok || len(st.RolesExcluded) != 1 {
+	if _, ok := st.Roles["spotifyd"]; ok || len(st.RolesExcluded) != 1 {
 		t.Errorf("state = %+v", st)
 	}
 	// upgrades.json refreshed: the pending disable never blocks, but the
 	// re-enable goes pending so `apply` will not refuse.
 	_, body = f.post("/components", url.Values{
-		"kind": {"role"}, "name": {"mpd"}, "enabled": {"1"},
+		"kind": {"role"}, "name": {"spotifyd"}, "enabled": {"1"},
 	}, true)
-	wants(t, body, "MPD enabled — it will be installed by the next upgrade")
+	wants(t, body, "Spotify Connect enabled — it will be installed by the next upgrade")
 }
 
 func TestEnableOptInRoleWritesAnExplicitYes(t *testing.T) {
@@ -362,14 +363,16 @@ func TestEnableOptInRoleWritesAnExplicitYes(t *testing.T) {
 	}
 }
 
-func TestInfraRoleIsRefused(t *testing.T) {
+func TestRequiredRoleIsRefused(t *testing.T) {
 	f := newFixture(t)
-	_, body := f.post("/components", url.Values{
-		"kind": {"role"}, "name": {"common"}, "enabled": {"0"},
-	}, true)
-	wants(t, body, "infrastructure role")
-	if _, ok := f.state().Roles["common"]; !ok {
-		t.Error("state changed")
+	for _, name := range []string{"common", "mpd"} {
+		_, body := f.post("/components", url.Values{
+			"kind": {"role"}, "name": {name}, "enabled": {"0"},
+		}, true)
+		wants(t, body, "required by odio")
+		if _, ok := f.state().Roles[name]; !ok {
+			t.Errorf("%s: state changed", name)
+		}
 	}
 }
 
@@ -479,7 +482,7 @@ func TestPostAnswersTheNoticeAndTheStreamTheState(t *testing.T) {
 		t.Errorf("code = %d, body = %q", code, body)
 	}
 	wants(t, body, `<div class="banner ok">Qobuz Connect disabled`)
-	batch = s.until(">Disabled</span>")
+	batch = s.until("Qobuz Connect — disabled, click to enable")
 	wants(t, batch, "event: upgrade\n", "event: components\n", `<div id="row-role-qbzd" class="card">`)
 	if strings.Contains(batch, "event: dac\n") || strings.Contains(batch, "event: banners\n") {
 		t.Error("a toggle re-sent sections it does not touch")
@@ -797,7 +800,7 @@ func TestApplyNowStartsAndWatchesTheUserUnit(t *testing.T) {
 	wants(t, s.until("event: dac"), "Upgrading…")
 	f.installQbzd()
 	unit.set("inactive", "success", 0)
-	batch := s.until(">Installed<")
+	batch := s.until("Qobuz Connect — installed, click to disable")
 	wants(t, batch, "event: upgrade\ndata: <section id=\"upgrade\"", "Upgrade: Done.", "Apply now",
 		"event: components\n", `<div id="row-role-qbzd" class="card">`)
 	if strings.Contains(batch, "Upgrade started.") {

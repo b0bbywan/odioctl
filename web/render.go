@@ -59,9 +59,10 @@ type actionView struct {
 type rowView struct {
 	Child                     bool
 	Label, Description        string
-	Status, Chip              string
+	Status                    string // picks the icon pair, and its colours
+	Title                     string // the state and what a click does: title/aria-label
+	Required                  bool   // a lock, where the toggle would be
 	Token, Kind, Name, Enable string // the toggle form
-	Button                    string
 	Actions                   []actionView
 }
 
@@ -112,16 +113,19 @@ type noticeView struct {
 	Modal   *ActionResult
 }
 
-// (chip text, button label) per component status; the button performs the
-// opposite action.
-var statusUI = map[components.Status][2]string{
-	components.Installed: {"Installed", "Disable"},
-	components.Excluded:  {"Disabled", "Enable"},
-	components.Default:   {"Will install on next upgrade", "Skip"},
+// The icon carries no words: its title says the state and what a click does.
+// No verb: a label can be plural ("Web radios").
+var statusTitle = map[components.Status]string{
+	components.Installed: "%s — installed, click to disable",
+	components.Excluded:  "%s — disabled, click to enable",
+	components.Default:   "%s — installs on the next upgrade, click to skip",
 }
 
 func rowViewOf(app *App, c components.Component, child bool) rowView {
-	ui := statusUI[c.Status]
+	title := fmt.Sprintf(statusTitle[c.Status], c.Label)
+	if !c.Toggleable {
+		title = c.Label + " — required by odio"
+	}
 	enable := "1"
 	if c.Enabled() {
 		enable = "0"
@@ -135,12 +139,12 @@ func rowViewOf(app *App, c components.Component, child bool) rowView {
 		Label:       c.Label,
 		Description: description,
 		Status:      string(c.Status),
-		Chip:        ui[0],
+		Title:       title,
+		Required:    !c.Toggleable,
 		Token:       app.Token(),
 		Kind:        string(c.Kind),
 		Name:        c.Name,
 		Enable:      enable,
-		Button:      ui[1],
 	}
 	// Actions are offered only once the component is installed — the command
 	// they run ships with the package. The pending link (or the outcome of
@@ -176,10 +180,9 @@ func componentsViewOf(app *App, st *state.State, stateErr string) componentsView
 			orphans = append(orphans, f)
 		}
 	}
-	// Infrastructure roles (not toggleable) are not rows: nothing to do with them.
 	rowsByGroup := map[string][]rowView{}
 	for _, r := range comps {
-		if r.Kind != components.Role || !r.Toggleable {
+		if r.Kind != components.Role {
 			continue
 		}
 		rows := append(rowsByGroup[r.Group], rowViewOf(app, r, false))
