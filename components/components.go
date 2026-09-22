@@ -50,6 +50,7 @@ type RoleInfo struct {
 	Group       string
 	Package     string
 	OptIn       bool     // install.sh asks [y/N]; see the package comment
+	Required    bool     // odio needs it: shown, never offered for disabling
 	Archs       []string // dpkg architectures it installs on; empty = all
 	Actions     []Action
 }
@@ -66,8 +67,20 @@ type FeatureInfo struct {
 // roles go to the last group.
 var Groups = []string{"Audio", "Playback", "Streaming", "System"}
 
-// Roles that install.sh always runs; never user-toggleable.
-var infraRoles = map[string]bool{"common": true, "upgrade": true}
+// The other audio server: odio runs one of the two, state.json says which.
+func otherAudioserver(picked string) string {
+	if picked == state.PipeWire {
+		return state.PulseAudio
+	}
+	return state.PipeWire
+}
+
+// A required role has no toggle while it is on. One install.sh answered N to
+// is still offered, so nothing is lost by requiring it.
+func toggleableRole(man *manifest.Manifest, name string, status Status) bool {
+	info, ok := roleInfo(man, name)
+	return !ok || !info.Required || status == Excluded
+}
 
 type catalogRole struct {
 	name string
@@ -81,12 +94,21 @@ type catalogFeature struct {
 
 // Slice order = display order within a group.
 var roleCatalog = []catalogRole{
-	// The odios `pipewire` role is experimental and not exposed by install.sh — not listed.
+	// The audio server odio does not run is hidden: state.json's audioserver
+	// picks one of the two, and neither is a toggle.
 	{"pulseaudio", RoleInfo{
 		Label:       "PulseAudio",
 		Description: "Sound server and network audio sink",
 		Group:       "Audio",
 		Package:     "pulseaudio",
+		Required:    true,
+	}},
+	{"pipewire", RoleInfo{
+		Label:       "PipeWire",
+		Description: "Sound server and network audio sink (experimental)",
+		Group:       "Audio",
+		Package:     "pipewire",
+		Required:    true,
 	}},
 	{"bluetooth", RoleInfo{
 		Label:       "Bluetooth",
@@ -99,6 +121,7 @@ var roleCatalog = []catalogRole{
 		Description: "Local library, CDs, web radios",
 		Group:       "Playback",
 		Package:     "mpd",
+		Required:    true, // upmpdcli and the disc player play through it
 	}},
 	{"mpd_discplayer", RoleInfo{
 		Label:       "CD player",
@@ -151,6 +174,7 @@ var roleCatalog = []catalogRole{
 		Description: "Remote control API and web dashboard",
 		Group:       "System",
 		Package:     "odio-api",
+		Required:    true,
 	}},
 	{"branding", RoleInfo{
 		Label:       "Branding",
@@ -161,11 +185,13 @@ var roleCatalog = []catalogRole{
 		Label:       "Base system",
 		Description: "Core configuration shared by every component",
 		Group:       "System",
+		Required:    true,
 	}},
 	{"upgrade", RoleInfo{
 		Label:       "Upgrade",
 		Description: "odioctl and the upgrade check timer",
 		Group:       "System",
+		Required:    true,
 	}},
 }
 
@@ -245,6 +271,9 @@ func roleInfo(man *manifest.Manifest, name string) (RoleInfo, bool) {
 		info.Group = meta.Group
 	}
 	info.OptIn = meta.OptIn
+	// A release that predates the field must not unlock what odioctl knows
+	// odio needs.
+	info.Required = info.Required || meta.Required
 	if meta.Archs != nil {
 		info.Archs = meta.Archs
 	}
@@ -353,6 +382,7 @@ func List(st state.State, man *manifest.Manifest) []Component {
 	for _, n := range st.RolesExcluded {
 		roles[n] = true
 	}
+	delete(roles, otherAudioserver(st.Audioserver))
 	// Not on this architecture: hidden unless installed or requested here,
 	// roles_excluded lists it on every odio install.sh skipped it on.
 	for n := range roles {
@@ -411,7 +441,7 @@ func List(st state.State, man *manifest.Manifest) []Component {
 			Group:            Groups[len(Groups)-1],
 			Status:           roleStatus(st, man, name),
 			InstalledVersion: st.Roles[name],
-			Toggleable:       !infraRoles[name],
+			Toggleable:       toggleableRole(man, name, roleStatus(st, man, name)),
 		}
 		if known {
 			c.Label = cmp.Or(info.Label, name)
@@ -467,8 +497,10 @@ func Set(st state.State, man *manifest.Manifest, kind Kind, name string, enabled
 	if kind != Role && kind != Feature {
 		return state.State{}, errorf("unknown component kind %q", kind)
 	}
-	if kind == Role && infraRoles[name] {
-		return state.State{}, errorf("%q is an infrastructure role and cannot be toggled", name)
+	if kind == Role && !enabled {
+		if info, ok := roleInfo(man, name); ok && info.Required {
+			return state.State{}, errorf("%q is required by odio and cannot be disabled", name)
+		}
 	}
 	if kind == Role && enabled {
 		if info, ok := roleInfo(man, name); ok && !info.supported() {

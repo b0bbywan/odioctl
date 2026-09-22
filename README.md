@@ -165,9 +165,12 @@ Roles (services) and features (plugins of a role) as recorded in state.json.
 Disabling adds the name to `roles_excluded`/`features_excluded` (and drops it
 from `roles`/`features`); enabling clears the exclusion so install.sh's own
 default installs it on the next run. Nothing is installed or removed until
-`odioctl upgrade apply` runs (`--force` to run it right away). `common` and
-`upgrade` are infrastructure roles and cannot be toggled. Names present in
-state.json are always accepted, even if newer than this odioctl.
+`odioctl upgrade apply` runs (`--force` to run it right away). A role the
+release marks `required` in its catalog — `common`, `upgrade`, `odio_api`,
+`mpd` and the audio server — is listed with its version but never offered
+for disabling; the audio server odio does not run is not listed at all.
+Names present in state.json are always accepted, even if newer than this
+odioctl.
 
 ### `dac`
 
@@ -200,8 +203,9 @@ argument (in particular `--config`) can go through sudo.
 
 A stdlib `net/http` server on port 8021 serving one server-rendered page —
 HTML forms over htmx (the same htmx and SSE extension as odio-api's
-dashboard), no JSON API: a components table with Enable/Disable buttons,
-and a DAC picker (select + Apply, Reset to drop the odioctl block, then a
+dashboard), no JSON API: a components table where one icon per row is both the
+state and its toggle — the action shows on hover, a lock stands for a required
+role — and a DAC picker (select + Apply, Reset to drop the odioctl block, then a
 Reboot button on the banner the change leaves). Actions are
 `POST /components`, `POST /dac`, `POST /dac/unset`, `POST /reboot`; the page answers with
 a message or error banner and every section follows odio live over

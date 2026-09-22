@@ -220,6 +220,45 @@ func TestInfraRoleRejected(t *testing.T) {
 	wantComponentError(t, err)
 }
 
+// The server odio does not run is not a row, and would otherwise read as
+// pending for ever: it is in neither of state.json's lists.
+func TestOnlyThePickedAudioserverIsListed(t *testing.T) {
+	st := makeState()
+	st.Audioserver = state.PipeWire
+	st.Roles = map[string]string{"pipewire": "1"}
+	m := byName(List(st, nil))
+	if _, listed := m[[2]string{"role", "pulseaudio"}]; listed {
+		t.Error("pulseaudio listed")
+	}
+	if c := m[[2]string{"role", "pipewire"}]; c.Status != Installed || c.Toggleable {
+		t.Errorf("pipewire = %+v", c)
+	}
+	if slices.Contains(Pending(st, nil), "role:pulseaudio") {
+		t.Error("pulseaudio pending")
+	}
+	_, err := Set(st, nil, Role, "pipewire", false)
+	wantComponentError(t, err)
+}
+
+// Required is shown, not hidden: a row with its version and no toggle. One
+// install.sh answered N to can still be brought back.
+func TestRequiredRolesAreListedWithoutAToggle(t *testing.T) {
+	st := makeState()
+	st.Roles = map[string]string{"common": "1", "upgrade": "1", "mpd": "1", "odio_api": "1", "pulseaudio": "1"}
+	for k, c := range byName(List(st, nil)) {
+		if k[0] == "role" && slices.Contains([]string{"common", "upgrade", "mpd", "odio_api", "pulseaudio"}, k[1]) {
+			if c.Toggleable || c.Status != Installed {
+				t.Errorf("%s = %+v", k[1], c)
+			}
+		}
+	}
+	st.Roles = map[string]string{}
+	st.RolesExcluded = []string{"odio_api"}
+	if c := byName(List(st, nil))[[2]string{"role", "odio_api"}]; !c.Toggleable {
+		t.Errorf("declined odio_api = %+v", c)
+	}
+}
+
 func TestUnknownKindAndNameRejected(t *testing.T) {
 	if _, err := Set(makeState(), nil, "plugin", "mpd", true); err == nil {
 		t.Error("want error for unknown kind")
