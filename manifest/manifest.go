@@ -73,6 +73,7 @@ type RoleMeta struct {
 	Group       string   `json:"group"`
 	Services    []string `json:"services"`
 	OptIn       bool     `json:"opt_in"`
+	Required    bool     `json:"required"`        // never offered for disabling
 	Archs       []string `json:"archs,omitempty"` // dpkg architectures; empty = all
 }
 

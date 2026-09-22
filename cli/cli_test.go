@@ -23,7 +23,7 @@ const stateJSON = `{
     "odios": "2026.5.0",
     "install_mode": "image",
     "target_user": "odio",
-    "roles": {"mpd": "2026.5.0", "common": "2026.5.0"},
+    "roles": {"mpd": "2026.5.0", "common": "2026.5.0", "spotifyd": "2026.5.0"},
     "roles_excluded": [],
     "features": ["tidal"],
     "features_excluded": [],
@@ -116,18 +116,18 @@ func TestComponentsListJSON(t *testing.T) {
 
 func TestComponentsDisableAndEnableRoundTrip(t *testing.T) {
 	path := writeStateFile(t)
-	rc, out, _ := run(t, "components", "--state", path, "disable", "mpd")
-	if rc != 0 || !strings.Contains(out, "role mpd disabled") {
+	rc, out, _ := run(t, "components", "--state", path, "disable", "spotifyd")
+	if rc != 0 || !strings.Contains(out, "role spotifyd disabled") {
 		t.Fatalf("rc = %d, out = %q", rc, out)
 	}
 	st, err := state.Read(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := st.Roles["mpd"]; ok || len(st.RolesExcluded) != 1 {
+	if _, ok := st.Roles["spotifyd"]; ok || len(st.RolesExcluded) != 1 {
 		t.Errorf("state = %+v", st)
 	}
-	if rc, _, _ = run(t, "components", "--state", path, "enable", "mpd"); rc != 0 {
+	if rc, _, _ = run(t, "components", "--state", path, "enable", "spotifyd"); rc != 0 {
 		t.Fatalf("rc = %d", rc)
 	}
 	st, _ = state.Read(path)
@@ -136,9 +136,9 @@ func TestComponentsDisableAndEnableRoundTrip(t *testing.T) {
 	}
 }
 
-func TestComponentsInfraRoleReturns2(t *testing.T) {
+func TestComponentsRequiredRoleReturns2(t *testing.T) {
 	rc, _, err := run(t, "components", "--state", writeStateFile(t), "disable", "common")
-	if rc != 2 || !strings.Contains(err, "infrastructure role") {
+	if rc != 2 || !strings.Contains(err, "required by odio") {
 		t.Errorf("rc = %d, stderr = %q", rc, err)
 	}
 }
