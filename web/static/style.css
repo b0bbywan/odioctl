@@ -100,6 +100,37 @@ a.badge:hover { color: var(--zinc-100); background: var(--zinc-700); }
 .chip.excluded { background: rgba(26, 42, 30, 0.5); color: var(--zinc-400); }
 .chip.default { background: rgba(42, 78, 53, 0.3); color: var(--zinc-300); }
 
+/* A component's state and its toggle in one icon: the state at rest, what a
+   click does on hover. No words — the button's title carries them. */
+.state {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px;
+  border: 0;
+  background: none;
+}
+button.state { cursor: pointer; }
+.state .act { display: none; }
+button.state:hover .rest, button.state:focus-visible .rest { display: none; }
+button.state:hover .act, button.state:focus-visible .act { display: inline-flex; }
+.state.lock { color: var(--zinc-500); }
+.state.installed .rest { color: var(--leaf); }
+.state.installed .act { color: var(--red); }
+.state.excluded .rest { color: var(--zinc-400); }
+.state.excluded .act { color: var(--lime); }
+.state.default .rest { color: var(--lime); }
+.state.default .act { color: var(--zinc-300); }
+
+/* Waiting for the next upgrade: it breathes, it does not blink. */
+@keyframes pending-breath {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 1; }
+}
+.pending { animation: pending-breath 2s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .pending { animation: none; opacity: 1; }
+}
+
 /* Content */
 main.wrap { padding-top: 20px; padding-bottom: 40px; }
 
