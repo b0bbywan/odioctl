@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -61,6 +62,17 @@ type State struct {
 // defaults is what an optional field meant before odios wrote it: PulseAudio
 // was the only server, the paths were install.sh's to pick.
 func defaults() State { return State{Audioserver: PulseAudio} }
+
+// Clone is a deep copy: editing its lists or map leaves st untouched.
+func (st State) Clone() State {
+	out := st
+	out.Roles = maps.Clone(st.Roles)
+	out.RolesExcluded = slices.Clone(st.RolesExcluded)
+	out.Features = slices.Clone(st.Features)
+	out.FeaturesExcluded = slices.Clone(st.FeaturesExcluded)
+	out.ReleaseHistory = slices.Clone(st.ReleaseHistory)
+	return out
+}
 
 // keys are State's json names in field order, required the non-optional ones.
 var keys, required = func() (all, required []string) {
