@@ -57,6 +57,31 @@ func TestCurrentSchemaRoundTrips(t *testing.T) {
 }
 
 // odios wrote no audioserver before PipeWire was offered: PulseAudio then.
+// Walks the struct so a slice or map field added later without Clone fails here.
+func TestCloneSharesNothing(t *testing.T) {
+	st := State{
+		Roles:         map[string]string{"mpd": "2026.5.0"},
+		RolesExcluded: []string{"qbzd"}, Features: []string{"tidal"},
+		FeaturesExcluded: []string{"qobuz"}, ReleaseHistory: []string{"2026.5.0"},
+	}
+	orig, clone := reflect.ValueOf(st), reflect.ValueOf(st.Clone())
+	for i := range orig.NumField() {
+		a, b := orig.Field(i), clone.Field(i)
+		switch a.Kind() {
+		case reflect.Slice, reflect.Map:
+			if a.Len() == 0 {
+				t.Fatalf("%s is empty here, the test cannot see it shared", orig.Type().Field(i).Name)
+			}
+			if a.UnsafePointer() == b.UnsafePointer() {
+				t.Errorf("Clone shares %s", orig.Type().Field(i).Name)
+			}
+		}
+	}
+	if !reflect.DeepEqual(st, st.Clone()) {
+		t.Error("Clone changed the values")
+	}
+}
+
 func TestMissingAudioserverIsPulseAudio(t *testing.T) {
 	raw := strings.Replace(validJSON, `"audioserver": "pipewire",`, "", 1)
 	got, err := Parse([]byte(raw))
