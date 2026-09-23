@@ -28,285 +28,6 @@ const (
 	Default   Status = "default"
 )
 
-// Action is a one-off command odio runs for the user. Argv is fixed here,
-// never built from the request; the server only fills in {host} (the address
-// the browser reached odio by) and {home} (the target user's home).
-type Action struct {
-	ID          string // form value, unique per component
-	Label       string // button text
-	Description string // one line: what the command does
-	Argv        []string
-	LinkScheme  string // the stdout token to surface as a link
-	LinkSkip    string // a link containing this is not the one
-	LinkLabel   string // anchor text for that token
-	LinkNote    string // what to know about the link
-	// the command prints the link and exits: the link stays on the row
-	LinkOutlivesRun bool
-}
-
-type RoleInfo struct {
-	Label       string // product name the user knows
-	Description string // one line, what it does
-	Group       string
-	Package     string
-	OptIn       bool     // install.sh asks [y/N]; see the package comment
-	Required    bool     // odio needs it: shown, never offered for disabling
-	Archs       []string // dpkg architectures it installs on; empty = all
-	Actions     []Action
-}
-
-type FeatureInfo struct {
-	Label       string
-	Description string
-	Package     string
-	Parent      string
-	Actions     []Action
-}
-
-// Groups is the display order of the web UI / `components list`; unknown
-// roles go to the last group.
-var Groups = []string{"Audio", "Playback", "Streaming", "System"}
-
-// The other audio server: odio runs one of the two, state.json says which.
-func otherAudioserver(picked string) string {
-	if picked == state.PipeWire {
-		return state.PulseAudio
-	}
-	return state.PipeWire
-}
-
-// A required role has no toggle while it is on. One install.sh answered N to
-// is still offered, so nothing is lost by requiring it.
-func toggleableRole(man *manifest.Manifest, name string, status Status) bool {
-	info, ok := roleInfo(man, name)
-	return !ok || !info.Required || status == Excluded
-}
-
-type catalogRole struct {
-	name string
-	info RoleInfo
-}
-
-type catalogFeature struct {
-	name string
-	info FeatureInfo
-}
-
-// Slice order = display order within a group.
-var roleCatalog = []catalogRole{
-	// The audio server odio does not run is hidden: state.json's audioserver
-	// picks one of the two, and neither is a toggle.
-	{"pulseaudio", RoleInfo{
-		Label:       "PulseAudio",
-		Description: "Sound server and network audio sink",
-		Group:       "Audio",
-		Package:     "pulseaudio",
-		Required:    true,
-	}},
-	{"pipewire", RoleInfo{
-		Label:       "PipeWire",
-		Description: "Sound server and network audio sink (experimental)",
-		Group:       "Audio",
-		Package:     "pipewire",
-		Required:    true,
-	}},
-	{"bluetooth", RoleInfo{
-		Label:       "Bluetooth",
-		Description: "Bluetooth audio, in and out",
-		Group:       "Audio",
-		Package:     "bluez",
-	}},
-	{"mpd", RoleInfo{
-		Label:       "MPD",
-		Description: "Local library, CDs, web radios",
-		Group:       "Playback",
-		Package:     "mpd",
-		Required:    true, // upmpdcli and the disc player play through it
-	}},
-	{"mpd_discplayer", RoleInfo{
-		Label:       "CD player",
-		Description: "Audio CD playback",
-		Group:       "Playback",
-		Package:     "mpd-discplayer",
-	}},
-	{"shairport_sync", RoleInfo{
-		Label:       "AirPlay",
-		Description: "AirPlay receiver",
-		Group:       "Streaming",
-		Package:     "shairport-sync",
-	}},
-	{"spotifyd", RoleInfo{
-		Label:       "Spotify Connect",
-		Description: "Spotify Connect receiver",
-		Group:       "Streaming",
-		Package:     "spotifyd",
-	}},
-	{"qbzd", RoleInfo{
-		Label:       "Qobuz Connect",
-		Description: "Qobuz Connect endpoint (experimental)",
-		Group:       "Streaming",
-		Package:     "qbzd",
-		OptIn:       true,
-		Actions: []Action{{
-			ID:          "login",
-			Label:       "Log in to Qobuz",
-			Description: "Sign in to Qobuz",
-			Argv:        []string{"qbzd", "login", "--callback-host", "{host}"},
-			LinkScheme:  "https://",
-			LinkLabel:   "Qobuz sign-in page",
-			LinkNote:    "valid 5 minutes",
-		}},
-	}},
-	{"snapclient", RoleInfo{
-		Label:       "Snapcast",
-		Description: "Multi-room audio client",
-		Group:       "Streaming",
-		Package:     "snapclient",
-	}},
-	{"upmpdcli", RoleInfo{
-		Label:       "UPnP / DLNA",
-		Description: "UPnP / OpenHome renderer",
-		Group:       "Streaming",
-		Package:     "upmpdcli",
-	}},
-	{"odio_api", RoleInfo{
-		Label:       "odio-api",
-		Description: "Remote control API and web dashboard",
-		Group:       "System",
-		Package:     "odio-api",
-		Required:    true,
-	}},
-	{"branding", RoleInfo{
-		Label:       "Branding",
-		Description: "Login banner",
-		Group:       "System",
-	}},
-	{"common", RoleInfo{
-		Label:       "Base system",
-		Description: "Core configuration shared by every component",
-		Group:       "System",
-		Required:    true,
-	}},
-	{"upgrade", RoleInfo{
-		Label:       "Upgrade",
-		Description: "odioctl and the upgrade check timer",
-		Group:       "System",
-		Required:    true,
-	}},
-}
-
-var featureCatalog = []catalogFeature{
-	{"mympd", FeatureInfo{
-		Label:       "myMPD",
-		Description: "Web UI for MPD",
-		Package:     "mympd",
-		Parent:      "mpd",
-	}},
-	{"tidal", FeatureInfo{
-		Label:       "Tidal",
-		Description: "Tidal streaming",
-		Package:     "upmpdcli-tidal",
-		Parent:      "upmpdcli",
-		Actions: []Action{{
-			ID:          "login",
-			Label:       "Log in to Tidal",
-			Description: "Sign in to Tidal",
-			Argv: []string{
-				"python3", "-u",
-				"/usr/share/upmpdcli/cdplugins/tidal/get_credentials.py",
-				"-f", "{home}/.cache/upmpdcli/tidal/oauth2.credentials.json",
-			},
-			LinkScheme: "https://",
-			LinkLabel:  "Tidal sign-in page",
-			LinkNote:   "valid 5 minutes",
-		}},
-	}},
-	{"qobuz", FeatureInfo{
-		Label:       "Qobuz",
-		Description: "Qobuz streaming",
-		Package:     "upmpdcli-qobuz",
-		Parent:      "upmpdcli",
-		Actions: []Action{{
-			ID:          "login",
-			Label:       "Log in to Qobuz",
-			Description: "Sign in to Qobuz",
-			Argv: []string{
-				"python3", "-u",
-				"/usr/share/upmpdcli/cdplugins/qobuz/qobuz-init-oauth.py",
-			},
-			LinkScheme:      "https://",
-			LinkSkip:        "localhost", // it prints that one for a local browser
-			LinkLabel:       "Qobuz sign-in page",
-			LinkOutlivesRun: true, // upmpdcli answers the redirect, not the script
-		}},
-	}},
-	{"upnpwebradios", FeatureInfo{
-		Label:       "Web radios",
-		Description: "Internet radios",
-		Package:     "upmpdcli-radios",
-		Parent:      "upmpdcli",
-	}},
-}
-
-// roleInfo is the local entry overlaid with the target manifest's catalog:
-// description, group and opt-in come from the release, label and actions never do.
-func roleInfo(man *manifest.Manifest, name string) (RoleInfo, bool) {
-	var info RoleInfo
-	found := false
-	for _, e := range roleCatalog {
-		if e.name == name {
-			info, found = e.info, true
-			break
-		}
-	}
-	if man == nil {
-		return info, found
-	}
-	meta, ok := man.Catalog[name]
-	if !ok {
-		return info, found
-	}
-	info.Description = cmp.Or(meta.Description, info.Description)
-	if slices.Contains(Groups, meta.Group) {
-		info.Group = meta.Group
-	}
-	info.OptIn = meta.OptIn
-	// A release that predates the field must not unlock what odioctl knows
-	// odio needs.
-	info.Required = info.Required || meta.Required
-	if meta.Archs != nil {
-		info.Archs = meta.Archs
-	}
-	return info, true
-}
-
-func featureInfo(name string) (FeatureInfo, bool) {
-	for _, e := range featureCatalog {
-		if e.name == name {
-			return e.info, true
-		}
-	}
-	return FeatureInfo{}, false
-}
-
-func roleIndex(name string) int {
-	for i, e := range roleCatalog {
-		if e.name == name {
-			return i
-		}
-	}
-	return len(roleCatalog)
-}
-
-func featureIndex(name string) int {
-	for i, e := range featureCatalog {
-		if e.name == name {
-			return i
-		}
-	}
-	return len(featureCatalog)
-}
-
 // Error reports an invalid component operation (unknown name/kind, infra role).
 type Error struct{ Reason string }
 
@@ -365,111 +86,126 @@ func featureStatus(st state.State, name string) Status {
 // features. man is the target release (nil = unknown): its catalog adds roles,
 // roles it lacks are dropped unless state.json names them, features follow their parent.
 func List(st state.State, man *manifest.Manifest) []Component {
-	var shipped map[string]string
-	roles := map[string]bool{}
+	roles := roleNames(st, man)
+	features := featureNames(st, man, roles)
+	out := make([]Component, 0, len(roles)+len(features))
+	for _, name := range catalogOrder(roleCatalog, roles) {
+		out = append(out, roleComponent(st, man, name))
+	}
+	for _, name := range catalogOrder(featureCatalog, features) {
+		out = append(out, featureComponent(st, name))
+	}
+	return out
+}
+
+func roleNames(st state.State, man *manifest.Manifest) map[string]bool {
+	names := map[string]bool{}
 	for _, e := range roleCatalog {
-		roles[e.name] = true
+		names[e.name] = true
 	}
 	if man != nil {
-		shipped = man.Roles
 		for n := range man.Catalog {
-			roles[n] = true
+			names[n] = true
 		}
 	}
 	for n := range st.Roles {
-		roles[n] = true
+		names[n] = true
 	}
 	for _, n := range st.RolesExcluded {
-		roles[n] = true
+		names[n] = true
 	}
-	delete(roles, otherAudioserver(st.Audioserver))
-	// Not on this architecture: hidden unless installed or requested here,
-	// roles_excluded lists it on every odio install.sh skipped it on.
-	for n := range roles {
-		_, inRoles := st.Roles[n]
-		if info, ok := roleInfo(man, n); ok && !info.supported() && !inRoles {
-			delete(roles, n)
-		}
+	maps.DeleteFunc(names, func(n string, _ bool) bool { return !roleShown(st, man, n) })
+	return names
+}
+
+// roleShown hides the audio server odio does not run, a role not for this
+// architecture unless installed or requested here (roles_excluded lists it on
+// every odio install.sh skipped it on), and one the release does not ship
+// unless state.json names it.
+func roleShown(st state.State, man *manifest.Manifest, name string) bool {
+	if name == otherAudioserver(st.Audioserver) {
+		return false
 	}
-	features := map[string]bool{}
+	_, inRoles := st.Roles[name]
+	if info, ok := roleInfo(man, name); ok && !info.supported() && !inRoles {
+		return false
+	}
+	if man != nil && man.Roles != nil {
+		_, ships := man.Roles[name]
+		return ships || stateHasRole(st, name)
+	}
+	return true
+}
+
+// The other audio server: odio runs one of the two, state.json says which.
+func otherAudioserver(picked string) string {
+	if picked == state.PipeWire {
+		return state.PulseAudio
+	}
+	return state.PipeWire
+}
+
+// featureNames drops, once the release is known, a feature whose parent is not
+// among roles, unless state.json names it.
+func featureNames(st state.State, man *manifest.Manifest, roles map[string]bool) map[string]bool {
+	names := map[string]bool{}
 	for _, e := range featureCatalog {
-		features[e.name] = true
+		names[e.name] = true
 	}
 	for _, n := range st.Features {
-		features[n] = true
+		names[n] = true
 	}
 	for _, n := range st.FeaturesExcluded {
-		features[n] = true
+		names[n] = true
 	}
-	if shipped != nil {
-		for n := range roles {
-			_, ships := shipped[n]
-			if !ships && !stateHasRole(st, n) {
-				delete(roles, n)
-			}
-		}
-		for n := range features {
-			if stateHasFeature(st, n) {
-				continue
-			}
-			if info, ok := featureInfo(n); ok && !roles[info.Parent] {
-				delete(features, n)
-			}
-		}
+	if man != nil && man.Roles != nil {
+		maps.DeleteFunc(names, func(n string, _ bool) bool {
+			info, ok := featureInfo(n)
+			return ok && !roles[info.Parent] && !stateHasFeature(st, n)
+		})
 	}
+	return names
+}
 
-	roleNames := slices.SortedFunc(maps.Keys(roles), func(a, b string) int {
-		if c := roleIndex(a) - roleIndex(b); c != 0 {
-			return c
-		}
-		return cmp.Compare(a, b)
-	})
-	featureNames := slices.SortedFunc(maps.Keys(features), func(a, b string) int {
-		if c := featureIndex(a) - featureIndex(b); c != 0 {
-			return c
-		}
-		return cmp.Compare(a, b)
-	})
+func roleComponent(st state.State, man *manifest.Manifest, name string) Component {
+	info, known := roleInfo(man, name)
+	status := roleStatus(st, man, name)
+	c := Component{
+		Kind:             Role,
+		Name:             name,
+		Label:            name,
+		Group:            Groups[len(Groups)-1],
+		Status:           status,
+		InstalledVersion: st.Roles[name],
+		// A required role has no toggle while it is on. One install.sh
+		// answered N to is still offered, so nothing is lost by requiring it.
+		Toggleable: !known || !info.Required || status == Excluded,
+	}
+	if known {
+		c.Label = cmp.Or(info.Label, name)
+		c.Description = info.Description
+		c.Group = cmp.Or(info.Group, c.Group)
+		c.Actions = info.Actions
+	}
+	return c
+}
 
-	out := make([]Component, 0, len(roleNames)+len(featureNames))
-	for _, name := range roleNames {
-		info, known := roleInfo(man, name)
-		c := Component{
-			Kind:             Role,
-			Name:             name,
-			Label:            name,
-			Group:            Groups[len(Groups)-1],
-			Status:           roleStatus(st, man, name),
-			InstalledVersion: st.Roles[name],
-			Toggleable:       toggleableRole(man, name, roleStatus(st, man, name)),
-		}
-		if known {
-			c.Label = cmp.Or(info.Label, name)
-			c.Description = info.Description
-			c.Group = cmp.Or(info.Group, c.Group)
-			c.Actions = info.Actions
-		}
-		out = append(out, c)
+func featureComponent(st state.State, name string) Component {
+	c := Component{
+		Kind:       Feature,
+		Name:       name,
+		Label:      name,
+		Group:      Groups[len(Groups)-1],
+		Status:     featureStatus(st, name),
+		Toggleable: true,
 	}
-	for _, name := range featureNames {
-		info, known := featureInfo(name)
-		c := Component{
-			Kind:       Feature,
-			Name:       name,
-			Label:      name,
-			Group:      Groups[len(Groups)-1],
-			Status:     featureStatus(st, name),
-			Toggleable: true,
-		}
-		if known {
-			c.Label = info.Label
-			c.Description = info.Description
-			c.Parent = info.Parent
-			c.Actions = info.Actions
-		}
-		out = append(out, c)
+	if info, known := featureInfo(name); known {
+		c.Label = info.Label
+		c.Description = info.Description
+		c.Parent = info.Parent
+		c.Actions = info.Actions
 	}
-	return out
+	return c
 }
 
 func stateHasRole(st state.State, name string) bool {
@@ -490,55 +226,71 @@ func known(st state.State, man *manifest.Manifest, kind Kind, name string) bool 
 	return inCatalog || stateHasFeature(st, name)
 }
 
+// kindOf resolves a bare CLI name: a role if the catalog or state.json knows
+// it as one, a feature otherwise.
+func kindOf(st state.State, man *manifest.Manifest, name string) Kind {
+	if _, ok := roleInfo(man, name); ok || stateHasRole(st, name) {
+		return Role
+	}
+	return Feature
+}
+
 // Set returns a copy of st with name opted in or out. Disabling moves a role
 // into RolesExcluded; enabling clears the exclusion, and records an opt-in
 // role with RequestedVersion (install.sh would answer its [y/N] with N).
 func Set(st state.State, man *manifest.Manifest, kind Kind, name string, enabled bool) (state.State, error) {
+	if err := checkSet(st, man, kind, name, enabled); err != nil {
+		return state.State{}, err
+	}
+	out := st.Clone()
+	if kind == Role {
+		setRole(&out, man, name, enabled)
+	} else {
+		setFeature(&out, name, enabled)
+	}
+	return out, nil
+}
+
+func checkSet(st state.State, man *manifest.Manifest, kind Kind, name string, enabled bool) error {
 	if kind != Role && kind != Feature {
-		return state.State{}, errorf("unknown component kind %q", kind)
+		return errorf("unknown component kind %q", kind)
 	}
-	if kind == Role && !enabled {
-		if info, ok := roleInfo(man, name); ok && info.Required {
-			return state.State{}, errorf("%q is required by odio and cannot be disabled", name)
+	if kind == Role {
+		info, ok := roleInfo(man, name)
+		if ok && !enabled && info.Required {
+			return errorf("%q is required by odio and cannot be disabled", name)
 		}
-	}
-	if kind == Role && enabled {
-		if info, ok := roleInfo(man, name); ok && !info.supported() {
-			return state.State{}, errorf("%q is not available on %s", name, arch)
+		if ok && enabled && !info.supported() {
+			return errorf("%q is not available on %s", name, arch)
 		}
 	}
 	if !known(st, man, kind, name) {
-		return state.State{}, errorf("unknown %s %q", kind, name)
+		return errorf("unknown %s %q", kind, name)
 	}
+	return nil
+}
 
-	out := st
-	out.Roles = maps.Clone(st.Roles)
-	out.RolesExcluded = slices.Clone(st.RolesExcluded)
-	out.Features = slices.Clone(st.Features)
-	out.FeaturesExcluded = slices.Clone(st.FeaturesExcluded)
-	out.ReleaseHistory = slices.Clone(st.ReleaseHistory)
-
-	if kind == Role {
-		if enabled {
-			out.RolesExcluded = without(out.RolesExcluded, name)
-			if info, ok := roleInfo(man, name); ok && info.OptIn {
-				if _, present := out.Roles[name]; !present {
-					out.Roles[name] = RequestedVersion
-				}
-			}
-		} else {
-			delete(out.Roles, name)
-			out.RolesExcluded = with(out.RolesExcluded, name)
-		}
-	} else {
-		if enabled {
-			out.FeaturesExcluded = without(out.FeaturesExcluded, name)
-		} else {
-			out.Features = without(out.Features, name)
-			out.FeaturesExcluded = with(out.FeaturesExcluded, name)
+func setRole(st *state.State, man *manifest.Manifest, name string, enabled bool) {
+	if !enabled {
+		delete(st.Roles, name)
+		st.RolesExcluded = with(st.RolesExcluded, name)
+		return
+	}
+	st.RolesExcluded = without(st.RolesExcluded, name)
+	if info, ok := roleInfo(man, name); ok && info.OptIn {
+		if _, present := st.Roles[name]; !present {
+			st.Roles[name] = RequestedVersion
 		}
 	}
-	return out, nil
+}
+
+func setFeature(st *state.State, name string, enabled bool) {
+	if !enabled {
+		st.Features = without(st.Features, name)
+		st.FeaturesExcluded = with(st.FeaturesExcluded, name)
+		return
+	}
+	st.FeaturesExcluded = without(st.FeaturesExcluded, name)
 }
 
 func with(list []string, name string) []string {
@@ -554,107 +306,6 @@ func without(list []string, name string) []string {
 	out := slices.DeleteFunc(slices.Clone(list), func(s string) bool { return s == name })
 	slices.Sort(out)
 	return out
-}
-
-// FindAction resolves the catalog action actionID of a component — the only
-// way an argv is resolved, so a request can never name a command of its own.
-func FindAction(kind Kind, name, actionID string) (Action, bool) {
-	var actions []Action
-	if kind == Role {
-		if info, ok := roleInfo(nil, name); ok {
-			actions = info.Actions
-		}
-	} else if info, ok := featureInfo(name); ok {
-		actions = info.Actions
-	}
-	for _, a := range actions {
-		if a.ID == actionID {
-			return a, true
-		}
-	}
-	return Action{}, false
-}
-
-// kindOf resolves a bare CLI name: a role if the catalog or state.json knows
-// it as one, a feature otherwise.
-func kindOf(st state.State, man *manifest.Manifest, name string) Kind {
-	if _, ok := roleInfo(man, name); ok || stateHasRole(st, name) {
-		return Role
-	}
-	return Feature
-}
-
-// KnownFeature reports whether the catalog lists this feature.
-func KnownFeature(name string) bool {
-	_, ok := featureInfo(name)
-	return ok
-}
-
-// LabelOf is the catalog label of a component, its name when unknown.
-func LabelOf(kind Kind, name string) string {
-	if kind == Role {
-		if info, ok := roleInfo(nil, name); ok {
-			return info.Label
-		}
-	} else if info, ok := featureInfo(name); ok {
-		return info.Label
-	}
-	return name
-}
-
-// Pending lists what the next `upgrade apply` would install, as ["role:mpd",
-// "feature:mympd", …] in catalog order. Disabling is never pending.
-func Pending(st state.State, man *manifest.Manifest) []string {
-	var refs []string
-	for _, c := range pending(st, man) {
-		refs = append(refs, string(c.Kind)+":"+c.Name)
-	}
-	return refs
-}
-
-// PendingRuns lists the roles that next apply must run for Pending to land: a
-// feature is installed by its parent, odio_api templates its service list.
-func PendingRuns(st state.State, man *manifest.Manifest) []string {
-	var runs []string
-	for _, c := range pending(st, man) {
-		role := c.Name
-		if c.Kind == Feature {
-			role = c.Parent
-		}
-		runs = with(runs, role)
-	}
-	if runs != nil {
-		runs = with(runs, "odio_api")
-	}
-	return runs
-}
-
-func pending(st state.State, man *manifest.Manifest) []Component {
-	ships := func(name string) bool {
-		if man == nil || man.Roles == nil {
-			_, ok := roleInfo(man, name)
-			return ok
-		}
-		_, ok := man.Roles[name]
-		return ok
-	}
-	var pending []Component
-	pendingRoles := map[string]bool{}
-	for _, c := range List(st, man) {
-		switch {
-		case c.Kind == Role:
-			if c.Toggleable && c.Status == Default && ships(c.Name) {
-				pending = append(pending, c)
-				pendingRoles[c.Name] = true
-			}
-		case c.Status == Default && c.Parent != "":
-			_, parentOn := st.Roles[c.Parent]
-			if parentOn || pendingRoles[c.Parent] {
-				pending = append(pending, c)
-			}
-		}
-	}
-	return pending
 }
 
 const ApplyNote = "Enabling installs on the next upgrade; disabling keeps the component " +
