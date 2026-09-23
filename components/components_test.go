@@ -285,7 +285,7 @@ func TestUnknownNamePresentInStateAccepted(t *testing.T) {
 // mechanism must not depend on which components declare an action today.
 func withAction(t *testing.T, action Action) {
 	t.Helper()
-	i := roleIndex("mpd")
+	i, _, _ := lookup(roleCatalog, "mpd")
 	old := roleCatalog[i].info.Actions
 	roleCatalog[i].info.Actions = []Action{action}
 	t.Cleanup(func() { roleCatalog[i].info.Actions = old })
