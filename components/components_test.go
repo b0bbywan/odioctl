@@ -508,3 +508,28 @@ func TestLabelOf(t *testing.T) {
 		t.Errorf("LabelOf = %q", got)
 	}
 }
+
+func TestKnownFeature(t *testing.T) {
+	if !KnownFeature("tidal") || KnownFeature("mpd") || KnownFeature("newthing") {
+		t.Error("KnownFeature is the feature catalog, and only it")
+	}
+}
+
+// A bare name is a role when the catalog or state.json says so, a feature
+// otherwise: an unknown name then fails as an unknown feature.
+func TestKindOf(t *testing.T) {
+	st := makeState()
+	st.Roles["localrole"] = "1"
+	st.RolesExcluded = []string{"skippedrole"}
+	for name, want := range map[string]Kind{
+		"mpd":         Role,
+		"localrole":   Role,
+		"skippedrole": Role,
+		"tidal":       Feature,
+		"newthing":    Feature,
+	} {
+		if got := kindOf(st, nil, name); got != want {
+			t.Errorf("kindOf(%q) = %q, want %q", name, got, want)
+		}
+	}
+}
