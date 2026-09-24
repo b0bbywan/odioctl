@@ -119,6 +119,13 @@ since rewritten in Go.
   nothing says what is required. The tests' catalog is `components/release_test.go`.
   A role whose `archs` exclude this odio's (`components.arch`, from GOARCH) is
   hidden unless state.json's `roles` has it, and cannot be enabled.
+- **The audio server is a choice, not two roles** (`components.AudioserverOf`):
+  state.json's `audioserver` picks pulseaudio or pipewire, neither is listed
+  nor toggled as a role (`components set audioserver NAME`, the select heading
+  the web's Audio group). PulseAudio is always offered, PipeWire once the
+  catalog lists it, and whichever is picked or installed here, so an odio can
+  always go back. Another server installed than the picked one is a switch:
+  pending (`role:<picked>`), and `apply` then runs every role.
 - **The target release is decided in one place: `check`.** `apply` never picks
   a release of its own on odio (`odio-upgrade.service` is a frozen sudoers
   argv, no `--version`), it follows upgrades.json — read once through
