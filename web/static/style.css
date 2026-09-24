@@ -296,6 +296,10 @@ section h3 {
   gap: 8px;
 }
 
+/* The audio server's row: a select where a toggle would be. */
+.card .meta form.choice { display: flex; align-items: center; gap: 8px; }
+.card .meta form.choice select { flex: none; padding: 5px 10px; font-size: 13px; }
+
 ul.pending { margin: 0 0 14px; padding-left: 20px; font-size: 14px; color: var(--zinc-300); }
 ul.pending li { margin: 2px 0; }
 

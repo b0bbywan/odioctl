@@ -67,8 +67,23 @@ type rowView struct {
 }
 
 type groupView struct {
-	Title string
-	Rows  []rowView
+	Title       string
+	Audioserver *audioserverView // heads the Audio group
+	Rows        []rowView
+}
+
+// audioserverView is the audio server's row: a choice, not a toggle.
+type audioserverView struct {
+	Description string // the picked server's
+	Note        string // a switch waiting for the next upgrade
+	Token       string
+	Choosable   bool // more than one option, and a catalog to check it against
+	Options     []audioserverOptionView
+}
+
+type audioserverOptionView struct {
+	Name, Label string
+	Selected    bool
 }
 
 type componentsView struct {
@@ -191,11 +206,35 @@ func componentsViewOf(app *App, st *state.State, stateErr string) componentsView
 	for _, f := range orphans {
 		rowsByGroup[last] = append(rowsByGroup[last], rowViewOf(app, f, false))
 	}
+	audio := audioserverViewOf(app, *st)
 	var view componentsView
 	for _, title := range components.Groups {
-		if rows := rowsByGroup[title]; len(rows) > 0 {
-			view.Groups = append(view.Groups, groupView{Title: title, Rows: rows})
+		g := groupView{Title: title, Rows: rowsByGroup[title]}
+		if title == "Audio" {
+			g.Audioserver = &audio
 		}
+		if len(g.Rows) > 0 || g.Audioserver != nil {
+			view.Groups = append(view.Groups, g)
+		}
+	}
+	return view
+}
+
+func audioserverViewOf(app *App, st state.State) audioserverView {
+	man := app.TargetManifest()
+	a := components.AudioserverOf(st, man)
+	view := audioserverView{Token: app.Token(), Choosable: man != nil && len(a.Options) > 1}
+	for _, o := range a.Options {
+		view.Options = append(view.Options, audioserverOptionView{Name: o.Name, Label: o.Label, Selected: o.Name == a.Picked})
+		if o.Name == a.Picked {
+			view.Description = o.Label
+			if o.Description != "" {
+				view.Description += " — " + o.Description
+			}
+		}
+	}
+	if a.Switching() {
+		view.Note = fmt.Sprintf("Replaces %s on the next upgrade.", components.LabelOf(man, components.Role, a.Installed))
 	}
 	return view
 }

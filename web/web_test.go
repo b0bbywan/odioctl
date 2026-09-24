@@ -80,8 +80,12 @@ func newFixture(t *testing.T) *fixture {
 	oldFetch := manifest.Fetch
 	manifest.Fetch = func(string) (*manifest.Manifest, error) {
 		return &manifest.Manifest{Odios: "2026.5.0",
-			Roles: map[string]string{"mpd": "1", "common": "1", "qbzd": "1", "spotifyd": "1"},
+			Roles: map[string]string{"mpd": "1", "common": "1", "qbzd": "1", "spotifyd": "1",
+				"pulseaudio": "1", "pipewire": "1"},
 			Catalog: map[string]manifest.RoleMeta{
+				"pulseaudio": {Label: "PulseAudio", Description: "Sound server", Group: "Audio", Required: true},
+				"pipewire": {Label: "PipeWire", Description: "Sound server (experimental)", Group: "Audio",
+					OptIn: true, Required: true},
 				"mpd": {Label: "MPD", Description: "Music library", Group: "Playback", Required: true,
 					Features: map[string]manifest.FeatureMeta{"mympd": {Label: "myMPD", Description: "Web player"}}},
 				"common": {Label: "Base system", Description: "Core system configuration", Group: "System",
@@ -362,6 +366,29 @@ func TestDisableAndEnableRole(t *testing.T) {
 		"kind": {"role"}, "name": {"spotifyd"}, "enabled": {"1"},
 	}, true)
 	wants(t, body, "Spotify Connect enabled — it will be installed by the next upgrade")
+}
+
+// The audio server is a select on its own row; picking the other one is a
+// switch the upgrade section then offers.
+func TestSwitchTheAudioserver(t *testing.T) {
+	f := newFixture(t)
+	f.writeRoles(map[string]string{"mpd": "1", "common": "1", "pulseaudio": "1"})
+	_, body := f.get("/")
+	wants(t, body, `id="row-audioserver"`, "PulseAudio — Sound server",
+		`<option value="pipewire">PipeWire</option>`, `hx-post="components/audioserver"`)
+	if strings.Contains(body, `id="row-role-pulseaudio"`) {
+		t.Error("the audio server listed as a role")
+	}
+	_, body = f.post("/components/audioserver", url.Values{"name": {"pipewire"}}, true)
+	wants(t, body, "Audio server: PipeWire — it replaces PulseAudio on the next upgrade (apply it below).")
+	if st := f.state(); st.Audioserver != state.PipeWire {
+		t.Errorf("audioserver = %q", st.Audioserver)
+	}
+	_, body = f.get("/")
+	wants(t, body, "Replaces PulseAudio on the next upgrade.", "install PipeWire",
+		`<option value="pipewire" selected>PipeWire</option>`)
+	_, body = f.post("/components/audioserver", url.Values{"name": {"jack"}}, true)
+	wants(t, body, `unknown audio server`)
 }
 
 func TestEnableOptInRoleWritesAnExplicitYes(t *testing.T) {
@@ -685,7 +712,7 @@ func TestNoCheckYetShowsTheStateWithoutToggles(t *testing.T) {
 	os.Remove(state.UpgradesPathFor(f.statePath))
 	_, body := f.get("/")
 	wants(t, body, "No upgrade check yet", `id="row-role-spotifyd"`)
-	if strings.Contains(body, `hx-post="components"`) {
+	if strings.Contains(body, `hx-post="components"`) || strings.Contains(body, `hx-post="components/audioserver"`) {
 		t.Error("a toggle without a catalog")
 	}
 }
