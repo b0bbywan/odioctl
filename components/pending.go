@@ -34,14 +34,7 @@ func PendingRuns(st state.State, man *manifest.Manifest) []string {
 }
 
 func pending(st state.State, man *manifest.Manifest) []Component {
-	ships := func(name string) bool {
-		if man == nil || man.Roles == nil {
-			_, ok := roleInfo(man, name)
-			return ok
-		}
-		_, ok := man.Roles[name]
-		return ok
-	}
+	ships := func(name string) bool { return man != nil && man.Ships(name) }
 	var pending []Component
 	// A switch installs the picked server: apply then runs every role.
 	if a := AudioserverOf(st, man); man != nil && a.Switching() {

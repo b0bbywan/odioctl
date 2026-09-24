@@ -88,13 +88,13 @@ var catalog = map[string]manifest.RoleMeta{
 	"common":   {Description: "Core configuration", Group: "System", Required: true},
 }
 
-// man is a release shipping roles, each described by catalog.
+// man is a release shipping roles at their version, each described by catalog.
 func man(odios string, roles map[string]string) manifest.Manifest {
-	m := manifest.Manifest{Odios: odios, Roles: roles, Catalog: map[string]manifest.RoleMeta{}}
-	for name := range roles {
-		if meta, ok := catalog[name]; ok {
-			m.Catalog[name] = meta
-		}
+	m := manifest.Manifest{Odios: odios, Catalog: map[string]manifest.RoleMeta{}}
+	for name, version := range roles {
+		meta := catalog[name]
+		meta.Version = version
+		m.Catalog[name] = meta
 	}
 	return m
 }

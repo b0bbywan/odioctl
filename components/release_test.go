@@ -8,7 +8,7 @@ import (
 )
 
 // release is the target manifest the tests run against: the catalog as odios
-// publishes it, pipewire included, every role shipped.
+// publishes it, pipewire included, every role shipped at its version.
 func release() *manifest.Manifest {
 	catalog := map[string]manifest.RoleMeta{
 		"pulseaudio": {Label: "PulseAudio", Description: "Sound server, with network streaming", Group: "Audio",
@@ -39,11 +39,12 @@ func release() *manifest.Manifest {
 		"common":   {Label: "Base system", Description: "Core system configuration", Group: "System", Required: true},
 		"upgrade":  {Label: "Upgrade", Description: "Keeps odio up to date", Group: "System", Required: true},
 	}
-	roles := map[string]string{}
-	for name := range catalog {
-		roles[name] = "2026.9.0"
+	for name, meta := range catalog {
+		meta.Version = "2026.9.0"
+		catalog[name] = meta
 	}
-	return &manifest.Manifest{Odios: "2026.9.0", Roles: roles, Catalog: catalog}
+	// no roles: the catalog's versions say what the release ships
+	return &manifest.Manifest{Odios: "2026.9.0", Catalog: catalog}
 }
 
 // shipping is release with only these roles in it.

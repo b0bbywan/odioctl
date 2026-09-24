@@ -67,7 +67,7 @@ func computeRoleUpgrades(st state.State, man manifest.Manifest) []RoleUpgrade {
 		if installed == "" {
 			continue
 		}
-		available := man.Roles[role]
+		available := man.RoleVersion(role)
 		if available != "" && versions.Compare(available, installed) > 0 {
 			upgrades = append(upgrades, RoleUpgrade{Name: role, Installed: installed, Available: available})
 		}
