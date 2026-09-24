@@ -9,26 +9,9 @@ import (
 	"slices"
 	"sort"
 
-	"github.com/b0bbywan/odioctl/components"
 	"github.com/b0bbywan/odioctl/state"
 	"github.com/b0bbywan/odioctl/versions"
 )
-
-// A warning, not an error: a feature odios adds after this odioctl shipped
-// is unknown here, and odio is fine.
-func warnFeaturesUnknown(st state.State) string {
-	var bad []string
-	for _, f := range slices.Concat(st.Features, st.FeaturesExcluded) {
-		if !components.KnownFeature(f) && !slices.Contains(bad, f) {
-			bad = append(bad, f)
-		}
-	}
-	if len(bad) == 0 {
-		return ""
-	}
-	sort.Strings(bad)
-	return fmt.Sprintf("features unknown to this odioctl: %v", bad)
-}
 
 func overlap(a []string, b []string) []string {
 	var out []string
@@ -89,10 +72,6 @@ func RunVerify(stderr io.Writer, statePath, expectedVersion string) int {
 	if err != nil {
 		fmt.Fprintf(stderr, "  %v\n", err)
 		return 1
-	}
-
-	if w := warnFeaturesUnknown(st); w != "" {
-		fmt.Fprintf(stderr, "  warning: %s\n", w)
 	}
 
 	checks := []string{

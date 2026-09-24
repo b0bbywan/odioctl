@@ -8,18 +8,6 @@ import (
 	"testing"
 )
 
-func TestWarnFeaturesUnknown(t *testing.T) {
-	st := makeState()
-	st.Features = []string{"tidal"}
-	if w := warnFeaturesUnknown(st); w != "" {
-		t.Errorf("warning = %q", w)
-	}
-	st.Features = []string{"tidal", "newthing"}
-	if w := warnFeaturesUnknown(st); !strings.Contains(w, "newthing") {
-		t.Errorf("warning = %q", w)
-	}
-}
-
 func TestFeaturesNoOverlap(t *testing.T) {
 	st := makeState()
 	st.Features = []string{"tidal"}
@@ -83,18 +71,7 @@ func TestRunVerify(t *testing.T) {
 		t.Errorf("valid state: rc = %d", rc)
 	}
 
-	st := makeState()
-	st.Features = []string{"newthing"}
-	p := writeState(t, t.TempDir(), st)
 	var stderr bytes.Buffer
-	if rc := RunVerify(&stderr, p, ""); rc != 0 {
-		t.Errorf("unknown feature: rc = %d", rc)
-	}
-	if !strings.Contains(stderr.String(), "warning") {
-		t.Errorf("stderr = %q", stderr.String())
-	}
-
-	stderr.Reset()
 	if rc := RunVerify(&stderr, path, "2026.6.0"); rc != 1 {
 		t.Errorf("check failure: rc = %d", rc)
 	}
