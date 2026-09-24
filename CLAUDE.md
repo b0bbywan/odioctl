@@ -107,9 +107,16 @@ since rewritten in Go.
   check, and a cache is never re-stamped with another tag) so the badge
   lights up and `apply` does not refuse. Disabling is never pending.
   The `Report` struct's field order and json tags are the wire format.
-- **The role catalog is local, overlaid by the target manifest's `catalog`**
-  (`components.roleInfo`): description, known group and opt-in come from the
-  release, so a new odios role needs no odioctl release; label and `Actions` never do.
+- **The catalog is the target manifest's `catalog`, and only it**
+  (`components.roleInfo`/`featureInfo`): the roles, their features (nested
+  under their parent), description, group, opt-in, required and archs come from
+  the release, so a new odios role or feature needs no odioctl release. What
+  odios ships but holds out of its catalog (`<role>_catalog: false`, pipewire)
+  is not offered. Only `Actions` are odioctl's (`roleActions`/`featureActions`).
+  The label is the catalog's too, the name capitalized when it has none
+  (`components.nameLabel`: shairport_sync reads Shairport-sync). Without a cached
+  manifest (no check yet) what state.json names is listed and nothing toggles:
+  nothing says what is required. The tests' catalog is `components/release_test.go`.
   A role whose `archs` exclude this odio's (`components.arch`, from GOARCH) is
   hidden unless state.json's `roles` has it, and cannot be enabled.
 - **The target release is decided in one place: `check`.** `apply` never picks
@@ -160,7 +167,7 @@ since rewritten in Go.
   believed on the Unix socket only (`web.originOf`, tagged per connection by
   `markProxied`), never on port 8021, where the page stays as it was.
 - **`components.Action` = a command odio runs for the user**, so nobody
-  needs a shell on it. `Argv` lives in the catalog and is never built from the
+  needs a shell on it. `Argv` lives in odioctl's action tables and is never built from the
   request — only `{host}` (the name the browser reached odio by, so an
   OAuth callback lands here) and `{home}` (the target user's home: argv runs
   without a shell, so a `~` would stay literal) are substituted. The web

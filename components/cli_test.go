@@ -24,7 +24,7 @@ func TestRunListTable(t *testing.T) {
 	st.Roles = map[string]string{"mpd": "2026.5.0", "qbzd": "1"}
 	st.Features = []string{"tidal"}
 	var out, errb bytes.Buffer
-	if rc := RunList(&out, &errb, writeState(t, st), nil, false); rc != 0 {
+	if rc := RunList(&out, &errb, writeState(t, st), release(), false); rc != 0 {
 		t.Fatalf("rc = %d, stderr %s", rc, errb.String())
 	}
 	got := out.String()
@@ -53,7 +53,7 @@ func TestRunListJSON(t *testing.T) {
 	st := makeState()
 	st.RolesExcluded = []string{"spotifyd"}
 	var out, errb bytes.Buffer
-	if rc := RunList(&out, &errb, writeState(t, st), nil, true); rc != 0 {
+	if rc := RunList(&out, &errb, writeState(t, st), release(), true); rc != 0 {
 		t.Fatalf("rc = %d, stderr %s", rc, errb.String())
 	}
 	var got []componentJSON
@@ -89,7 +89,7 @@ func TestRunListUnreadableState(t *testing.T) {
 func TestRunSetWritesState(t *testing.T) {
 	path := writeState(t, makeState())
 	var out, errb bytes.Buffer
-	if rc := RunSet(&out, &errb, path, nil, "tidal", false); rc != 0 {
+	if rc := RunSet(&out, &errb, path, release(), "tidal", false); rc != 0 {
 		t.Fatalf("rc = %d, stderr %s", rc, errb.String())
 	}
 	if !strings.HasPrefix(out.String(), "feature tidal disabled. ") {
@@ -107,7 +107,7 @@ func TestRunSetWritesState(t *testing.T) {
 func TestRunSetRefusalLeavesStateAlone(t *testing.T) {
 	path := writeState(t, makeState())
 	var out, errb bytes.Buffer
-	if rc := RunSet(&out, &errb, path, nil, "mpd", false); rc != 2 {
+	if rc := RunSet(&out, &errb, path, release(), "mpd", false); rc != 2 {
 		t.Errorf("rc = %d, want 2", rc)
 	}
 	if !strings.Contains(errb.String(), "required by odio") {

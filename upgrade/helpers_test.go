@@ -71,6 +71,30 @@ func noInstall(t *testing.T) {
 	t.Cleanup(func() { runInstall = old })
 }
 
+// catalog describes the roles the tests ship, the way odios publishes them.
+var catalog = map[string]manifest.RoleMeta{
+	"pulseaudio": {Description: "PulseAudio server", Group: "Audio", Required: true},
+	"pipewire":   {Description: "PipeWire server", Group: "Audio", OptIn: true, Required: true},
+	"bluetooth":  {Description: "Bluetooth A2DP sink", Group: "Audio"},
+	"mpd": {Description: "Music Player Daemon", Group: "Playback", Required: true,
+		Features: map[string]manifest.FeatureMeta{"mympd": {Description: "Web UI for MPD"}}},
+	"spotifyd":   {Description: "Spotify Connect endpoint", Group: "Streaming"},
+	"qbzd":       {Description: "Qobuz Connect endpoint", Group: "Streaming", OptIn: true},
+	"snapclient": {Description: "Snapcast client", Group: "Streaming"},
+	"upmpdcli": {Description: "UPnP / OpenHome renderer", Group: "Streaming",
+		Features: map[string]manifest.FeatureMeta{"tidal": {Description: "Tidal streaming"}}},
+	"odio_api": {Description: "Remote control API", Group: "System", Required: true},
+	"branding": {Description: "Login banner", Group: "System"},
+	"common":   {Description: "Core configuration", Group: "System", Required: true},
+}
+
+// man is a release shipping roles, each described by catalog.
 func man(odios string, roles map[string]string) manifest.Manifest {
-	return manifest.Manifest{Odios: odios, Roles: roles}
+	m := manifest.Manifest{Odios: odios, Roles: roles, Catalog: map[string]manifest.RoleMeta{}}
+	for name := range roles {
+		if meta, ok := catalog[name]; ok {
+			m.Catalog[name] = meta
+		}
+	}
+	return m
 }

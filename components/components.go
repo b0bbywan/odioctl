@@ -1,6 +1,7 @@
 // Package components models odios roles (services) and features (plugins of a
 // role), toggled through state.json; nothing is installed until `odioctl
-// upgrade apply` runs. The catalog is advisory: unknown names are accepted.
+// upgrade apply` runs. The target release's catalog says what exists; a name
+// only state.json knows is still listed. Without a release, nothing is toggled.
 package components
 
 import (
@@ -40,7 +41,7 @@ func errorf(format string, args ...any) error {
 type Component struct {
 	Kind             Kind
 	Name             string
-	Label            string
+	Label            string // the catalog's, else the name capitalized
 	Description      string
 	Group            string
 	Status           Status
@@ -82,27 +83,39 @@ func featureStatus(st state.State, name string) Status {
 	return Default
 }
 
-// List returns roles in catalog order (grouped), unknown roles last, then
-// features. man is the target release (nil = unknown): its catalog adds roles,
-// roles it lacks are dropped unless state.json names them, features follow their parent.
+// List returns roles by group then label, then features. man is the
+// target release (nil = unknown): its catalog lists roles and their features,
+// state.json adds what it names.
 func List(st state.State, man *manifest.Manifest) []Component {
 	roles := roleNames(st, man)
 	features := featureNames(st, man, roles)
 	out := make([]Component, 0, len(roles)+len(features))
-	for _, name := range catalogOrder(roleCatalog, roles) {
+	for name := range roles {
 		out = append(out, roleComponent(st, man, name))
 	}
-	for _, name := range catalogOrder(featureCatalog, features) {
-		out = append(out, featureComponent(st, name))
+	for name := range features {
+		out = append(out, featureComponent(st, man, name))
 	}
+	slices.SortFunc(out, func(a, b Component) int {
+		return cmp.Or(
+			cmp.Compare(kindRank(a.Kind), kindRank(b.Kind)),
+			cmp.Compare(slices.Index(Groups, a.Group), slices.Index(Groups, b.Group)),
+			cmp.Compare(a.Label, b.Label),
+			cmp.Compare(a.Name, b.Name),
+		)
+	})
 	return out
+}
+
+func kindRank(k Kind) int {
+	if k == Role {
+		return 0
+	}
+	return 1
 }
 
 func roleNames(st state.State, man *manifest.Manifest) map[string]bool {
 	names := map[string]bool{}
-	for _, e := range roleCatalog {
-		names[e.name] = true
-	}
 	if man != nil {
 		for n := range man.Catalog {
 			names[n] = true
@@ -145,24 +158,24 @@ func otherAudioserver(picked string) string {
 	return state.PipeWire
 }
 
-// featureNames drops, once the release is known, a feature whose parent is not
-// among roles, unless state.json names it.
+// featureNames lists the catalog's features whose parent is among roles, and
+// every feature state.json names.
 func featureNames(st state.State, man *manifest.Manifest, roles map[string]bool) map[string]bool {
 	names := map[string]bool{}
-	for _, e := range featureCatalog {
-		names[e.name] = true
+	if man != nil {
+		for role, meta := range man.Catalog {
+			if roles[role] {
+				for n := range meta.Features {
+					names[n] = true
+				}
+			}
+		}
 	}
 	for _, n := range st.Features {
 		names[n] = true
 	}
 	for _, n := range st.FeaturesExcluded {
 		names[n] = true
-	}
-	if man != nil && man.Roles != nil {
-		maps.DeleteFunc(names, func(n string, _ bool) bool {
-			info, ok := featureInfo(n)
-			return ok && !roles[info.Parent] && !stateHasFeature(st, n)
-		})
 	}
 	return names
 }
@@ -173,37 +186,34 @@ func roleComponent(st state.State, man *manifest.Manifest, name string) Componen
 	c := Component{
 		Kind:             Role,
 		Name:             name,
-		Label:            name,
+		Label:            nameLabel(name),
 		Group:            Groups[len(Groups)-1],
 		Status:           status,
 		InstalledVersion: st.Roles[name],
 		// A required role has no toggle while it is on. One install.sh
 		// answered N to is still offered, so nothing is lost by requiring it.
-		Toggleable: !known || !info.Required || status == Excluded,
+		// Without a release nothing is: it is what says which ones are required.
+		Toggleable: man != nil && (!known || !info.Required || status == Excluded),
+		Actions:    roleActions[name],
 	}
 	if known {
-		c.Label = cmp.Or(info.Label, name)
-		c.Description = info.Description
-		c.Group = cmp.Or(info.Group, c.Group)
-		c.Actions = info.Actions
+		c.Label, c.Description, c.Group = info.Label, info.Description, info.Group
 	}
 	return c
 }
 
-func featureComponent(st state.State, name string) Component {
+func featureComponent(st state.State, man *manifest.Manifest, name string) Component {
 	c := Component{
 		Kind:       Feature,
 		Name:       name,
-		Label:      name,
+		Label:      nameLabel(name),
 		Group:      Groups[len(Groups)-1],
 		Status:     featureStatus(st, name),
-		Toggleable: true,
+		Toggleable: man != nil,
+		Actions:    featureActions[name],
 	}
-	if info, known := featureInfo(name); known {
-		c.Label = info.Label
-		c.Description = info.Description
-		c.Parent = info.Parent
-		c.Actions = info.Actions
+	if info, known := featureInfo(man, name); known {
+		c.Label, c.Description, c.Parent = info.Label, info.Description, info.Parent
 	}
 	return c
 }
@@ -222,7 +232,7 @@ func known(st state.State, man *manifest.Manifest, kind Kind, name string) bool 
 		_, inCatalog := roleInfo(man, name)
 		return inCatalog || stateHasRole(st, name)
 	}
-	_, inCatalog := featureInfo(name)
+	_, inCatalog := featureInfo(man, name)
 	return inCatalog || stateHasFeature(st, name)
 }
 
@@ -254,6 +264,9 @@ func Set(st state.State, man *manifest.Manifest, kind Kind, name string, enabled
 func checkSet(st state.State, man *manifest.Manifest, kind Kind, name string, enabled bool) error {
 	if kind != Role && kind != Feature {
 		return errorf("unknown component kind %q", kind)
+	}
+	if man == nil {
+		return errorf("no release catalog yet: run `odioctl upgrade check` first")
 	}
 	if kind == Role {
 		info, ok := roleInfo(man, name)
