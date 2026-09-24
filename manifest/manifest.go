@@ -75,6 +75,12 @@ type RoleMeta struct {
 	OptIn       bool     `json:"opt_in"`
 	Required    bool     `json:"required"`        // never offered for disabling
 	Archs       []string `json:"archs,omitempty"` // dpkg architectures; empty = all
+	// The role's plugins (tidal under upmpdcli): the parent is the nesting.
+	Features map[string]FeatureMeta `json:"features,omitempty"`
+}
+
+type FeatureMeta struct {
+	Description string `json:"description"`
 }
 
 // releaseAssetURL is where GitHub serves asset for a release tag — the one

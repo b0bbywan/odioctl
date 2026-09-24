@@ -161,6 +161,19 @@ func TestFetchReadsTheCatalog(t *testing.T) {
 	}
 }
 
+func TestFetchReadsTheFeaturesUnderTheirRole(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"odios": "2026.9.0", "roles": {"upmpdcli": "2026.9.0"}, "catalog": {"upmpdcli":
+			{"description": "UPnP", "group": "Streaming", "features": {"tidal": {"description": "Tidal streaming"}}}}}`))
+	}))
+	defer srv.Close()
+	got, err := Fetch(srv.URL)
+	want := map[string]FeatureMeta{"tidal": {Description: "Tidal streaming"}}
+	if err != nil || !reflect.DeepEqual(got.Catalog["upmpdcli"].Features, want) {
+		t.Errorf("Fetch = %+v, %v; want upmpdcli features %+v", got, err, want)
+	}
+}
+
 func TestFetchReturnsTheError(t *testing.T) {
 	srv := httptest.NewServer(http.NotFoundHandler())
 	defer srv.Close()
