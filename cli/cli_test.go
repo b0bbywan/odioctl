@@ -153,6 +153,23 @@ func TestComponentsDisableAndEnableRoundTrip(t *testing.T) {
 	}
 }
 
+// The catalog of upgradesJSON holds pipewire back: only PulseAudio is offered.
+func TestComponentsSetAudioserver(t *testing.T) {
+	path := writeStateFile(t)
+	if rc, out, _ := run(t, "components", "--state", path, "set", "audioserver", "pulseaudio"); rc != 0 ||
+		out != "audioserver pulseaudio.\n" {
+		t.Errorf("rc = %d, out = %q", rc, out)
+	}
+	if rc, _, err := run(t, "components", "--state", path, "set", "audioserver", "pipewire"); rc != 2 ||
+		!strings.Contains(err, "not offered") {
+		t.Errorf("rc = %d, stderr = %q", rc, err)
+	}
+	if rc, _, err := run(t, "components", "--state", path, "set", "pipewire"); rc != 2 ||
+		!strings.Contains(err, "usage: odioctl components set audioserver pulseaudio|pipewire") {
+		t.Errorf("rc = %d, stderr = %q", rc, err)
+	}
+}
+
 func TestComponentsRequiredRoleReturns2(t *testing.T) {
 	rc, _, err := run(t, "components", "--state", writeStateFile(t), "disable", "common")
 	if rc != 2 || !strings.Contains(err, "required by odio") {

@@ -18,7 +18,7 @@ odio system control: upgrades, components, DAC overlay and a local web UI.
 commands:
   upgrade      check for / apply / verify odios upgrades
   pwa-url      print the PWA URL for this host
-  components   list / enable / disable roles and features
+  components   list / enable / disable roles and features, set the audio server
   dac          select the DAC overlay in config.txt
   web          serve the local web UI
   state        record what an odios run installed / show state.json (for odios)

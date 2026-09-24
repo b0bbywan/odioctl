@@ -29,6 +29,7 @@ func TestRunListTable(t *testing.T) {
 	}
 	got := out.String()
 	for _, want := range []string{
+		"audioserver: pulseaudio (pulseaudio, pipewire)\n",
 		"roles:\n",
 		"features:\n",
 		"  mpd              installed  (2026.5.0) [infra]\n",
@@ -115,6 +116,41 @@ func TestRunSetRefusalLeavesStateAlone(t *testing.T) {
 	}
 	if st, _ := state.Read(path); len(st.RolesExcluded) != 0 {
 		t.Errorf("roles_excluded = %v", st.RolesExcluded)
+	}
+}
+
+func TestRunSetAudioserverWritesTheSwitch(t *testing.T) {
+	st := makeState()
+	st.Roles = map[string]string{"pulseaudio": "1"}
+	path := writeState(t, st)
+	var out, errb bytes.Buffer
+	if rc := RunSetAudioserver(&out, &errb, path, release(), "pipewire"); rc != 0 {
+		t.Fatalf("rc = %d, stderr %s", rc, errb.String())
+	}
+	if out.String() != "audioserver pipewire. It replaces pulseaudio on the next upgrade.\n" {
+		t.Errorf("stdout = %q", out.String())
+	}
+	if got, _ := state.Read(path); got.Audioserver != state.PipeWire {
+		t.Errorf("audioserver = %q", got.Audioserver)
+	}
+	out.Reset()
+	if rc := RunList(&out, &errb, path, release(), false); rc != 0 ||
+		!strings.Contains(out.String(), "audioserver: pipewire (pulseaudio, pipewire) — replaces pulseaudio") {
+		t.Errorf("list = %q", out.String())
+	}
+}
+
+func TestRunSetAudioserverRefusalLeavesStateAlone(t *testing.T) {
+	path := writeState(t, makeState())
+	var out, errb bytes.Buffer
+	if rc := RunSetAudioserver(&out, &errb, path, heldBack(), "pipewire"); rc != 2 {
+		t.Errorf("rc = %d, want 2", rc)
+	}
+	if !strings.Contains(errb.String(), "not offered by this release") {
+		t.Errorf("stderr = %q", errb.String())
+	}
+	if st, _ := state.Read(path); st.Audioserver != state.PulseAudio {
+		t.Errorf("audioserver = %q", st.Audioserver)
 	}
 }
 

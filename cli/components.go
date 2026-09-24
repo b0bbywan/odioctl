@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/b0bbywan/odioctl/components"
 	"github.com/b0bbywan/odioctl/state"
@@ -17,7 +18,7 @@ func runComponents(stdout, stderr io.Writer, args []string) int {
 	}
 	rest := fs.Args()
 	if len(rest) == 0 {
-		fmt.Fprintln(stderr, "usage: odioctl components [--state PATH] list|enable|disable ...")
+		fmt.Fprintln(stderr, "usage: odioctl components [--state PATH] list|enable|disable|set ...")
 		return 2
 	}
 	// The target manifest `check` cached, so its catalog describes new roles.
@@ -36,6 +37,13 @@ func runComponents(stdout, stderr io.Writer, args []string) int {
 			return 2
 		}
 		return components.RunSet(stdout, stderr, *statePath, man, rest[1], rest[0] == "enable")
+	case "set":
+		if len(rest) != 3 || rest[1] != "audioserver" {
+			fmt.Fprintf(stderr, "usage: odioctl components set audioserver %s\n",
+				strings.Join(components.Audioservers, "|"))
+			return 2
+		}
+		return components.RunSetAudioserver(stdout, stderr, *statePath, man, rest[2])
 	default:
 		fmt.Fprintf(stderr, "odioctl components: unknown command %q\n", rest[0])
 		return 2
