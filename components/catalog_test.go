@@ -10,7 +10,7 @@ import (
 // withCatalog is a release shipping mpd, qbzd and newrole, described by meta.
 func withCatalog(meta manifest.RoleMeta) *manifest.Manifest {
 	man := shipping("mpd", "qbzd")
-	man.Roles["newrole"] = "x"
+	meta.Version = "x"
 	man.Catalog["newrole"] = meta
 	return man
 }
@@ -93,7 +93,7 @@ func TestManifestUnknownGroupIsIgnored(t *testing.T) {
 // odioctl can offer it) is not offered here either.
 func TestAShippedRoleOutOfTheCatalogIsNotListed(t *testing.T) {
 	man := withCatalog(manifest.RoleMeta{})
-	man.Roles["pipewire"] = "x"
+	man.Roles = map[string]string{"pipewire": "x"} // for the odioctl before the catalog
 	if lists(List(makeState(), man), "pipewire") {
 		t.Error("pipewire listed")
 	}

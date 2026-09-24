@@ -143,9 +143,8 @@ func roleShown(st state.State, man *manifest.Manifest, name string) bool {
 	if info, ok := roleInfo(man, name); ok && !info.supported() && !inRoles {
 		return false
 	}
-	if man != nil && man.Roles != nil {
-		_, ships := man.Roles[name]
-		return ships || stateHasRole(st, name)
+	if man != nil {
+		return man.Ships(name) || stateHasRole(st, name)
 	}
 	return true
 }

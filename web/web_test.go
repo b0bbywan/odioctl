@@ -80,19 +80,19 @@ func newFixture(t *testing.T) *fixture {
 	oldFetch := manifest.Fetch
 	manifest.Fetch = func(string) (*manifest.Manifest, error) {
 		return &manifest.Manifest{Odios: "2026.5.0",
-			Roles: map[string]string{"mpd": "1", "common": "1", "qbzd": "1", "spotifyd": "1",
-				"pulseaudio": "1", "pipewire": "1"},
 			Catalog: map[string]manifest.RoleMeta{
-				"pulseaudio": {Label: "PulseAudio", Description: "Sound server", Group: "Audio", Required: true},
-				"pipewire": {Label: "PipeWire", Description: "Sound server (experimental)", Group: "Audio",
-					OptIn: true, Required: true},
-				"mpd": {Label: "MPD", Description: "Music library", Group: "Playback", Required: true,
-					Features: map[string]manifest.FeatureMeta{"mympd": {Label: "myMPD", Description: "Web player"}}},
-				"common": {Label: "Base system", Description: "Core system configuration", Group: "System",
+				"pulseaudio": {Version: "1", Label: "PulseAudio", Description: "Sound server", Group: "Audio",
 					Required: true},
-				"qbzd": {Label: "Qobuz Connect", Description: "Play from the Qobuz app (experimental)",
+				"pipewire": {Version: "1", Label: "PipeWire", Description: "Sound server (experimental)",
+					Group: "Audio", OptIn: true, Required: true},
+				"mpd": {Version: "1", Label: "MPD", Description: "Music library", Group: "Playback", Required: true,
+					Features: map[string]manifest.FeatureMeta{"mympd": {Label: "myMPD", Description: "Web player"}}},
+				"common": {Version: "1", Label: "Base system", Description: "Core system configuration",
+					Group: "System", Required: true},
+				"qbzd": {Version: "1", Label: "Qobuz Connect", Description: "Play from the Qobuz app (experimental)",
 					Group: "Streaming", OptIn: true},
-				"spotifyd": {Label: "Spotify Connect", Description: "Play from the Spotify app", Group: "Streaming"},
+				"spotifyd": {Version: "1", Label: "Spotify Connect", Description: "Play from the Spotify app",
+					Group: "Streaming"},
 			}}, nil
 	}
 	t.Cleanup(func() { manifest.Fetch = oldFetch })

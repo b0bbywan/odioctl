@@ -88,7 +88,7 @@ func DeriveRunEnv(st state.State, man *manifest.Manifest, installEnv map[string]
 		if installEnv["INSTALL_"+strings.ToUpper(role)] == "N" || slices.Contains(mustRun, role) {
 			continue
 		}
-		if versions.RoleUpToDate(installed, man.Roles[role], st.Odios) {
+		if versions.RoleUpToDate(installed, man.RoleVersion(role), st.Odios) {
 			env["RUN_"+strings.ToUpper(role)] = "N"
 		}
 	}
