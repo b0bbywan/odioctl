@@ -69,6 +69,7 @@ type Manifest struct {
 // RoleMeta is a role's catalog entry as odios publishes it; actions are never
 // part of it, an argv does not come from a downloaded file.
 type RoleMeta struct {
+	Label       string   `json:"label,omitempty"` // the name the user knows; "" = the role's
 	Description string   `json:"description"`
 	Group       string   `json:"group"`
 	Services    []string `json:"services"`
@@ -80,6 +81,7 @@ type RoleMeta struct {
 }
 
 type FeatureMeta struct {
+	Label       string `json:"label,omitempty"`
 	Description string `json:"description"`
 }
 
