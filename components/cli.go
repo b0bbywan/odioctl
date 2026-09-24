@@ -57,7 +57,16 @@ func toJSON(comps []Component) []componentJSON {
 	return out
 }
 
-func printTable(w io.Writer, comps []Component) {
+func printTable(w io.Writer, a Audioserver, comps []Component) {
+	var options []string
+	for _, o := range a.Options {
+		options = append(options, o.Name)
+	}
+	fmt.Fprintf(w, "audioserver: %s (%s)", a.Picked, strings.Join(options, ", "))
+	if a.Switching() {
+		fmt.Fprintf(w, " — replaces %s on the next upgrade", a.Installed)
+	}
+	fmt.Fprintln(w)
 	for _, kind := range []Kind{Role, Feature} {
 		fmt.Fprintf(w, "%ss:\n", kind)
 		for _, c := range comps {
@@ -96,7 +105,7 @@ func RunList(stdout, stderr io.Writer, statePath string, man *manifest.Manifest,
 	}
 	comps := List(st, man)
 	if !asJSON {
-		printTable(stdout, comps)
+		printTable(stdout, AudioserverOf(st, man), comps)
 		return 0
 	}
 	b, err := json.MarshalIndent(toJSON(comps), "", "  ")
@@ -130,5 +139,29 @@ func RunSet(stdout, stderr io.Writer, statePath string, man *manifest.Manifest, 
 		verb = "enabled"
 	}
 	fmt.Fprintf(stdout, "%s %s %s. %s\n", kind, name, verb, ApplyNote)
+	return 0
+}
+
+// RunSetAudioserver picks the audio server; the switch waits for apply.
+func RunSetAudioserver(stdout, stderr io.Writer, statePath string, man *manifest.Manifest, name string) int {
+	st, err := state.Read(statePath)
+	if err != nil {
+		fmt.Fprintf(stderr, "Error reading %s: %v\n", statePath, err)
+		return 2
+	}
+	newState, err := SetAudioserver(st, man, name)
+	if err != nil {
+		fmt.Fprintf(stderr, "Error: %v\n", err)
+		return 2
+	}
+	if err := state.Write(statePath, newState); err != nil {
+		fmt.Fprintf(stderr, "Error writing %s: %v\n", statePath, err)
+		return 2
+	}
+	fmt.Fprintf(stdout, "audioserver %s.", name)
+	if a := AudioserverOf(newState, man); a.Switching() {
+		fmt.Fprintf(stdout, " It replaces %s on the next upgrade.", a.Installed)
+	}
+	fmt.Fprintln(stdout)
 	return 0
 }
