@@ -10,15 +10,13 @@ import (
 // upgrades.json in step so odio-ui's badge and `upgrade apply` see the
 // pending install without waiting for the daily timer.
 func (a *App) SetComponent(kind components.Kind, name string, enabled bool) (string, error) {
-	if err := a.writeComponent(kind, name, enabled); err != nil {
+	err := a.writeState(func(st state.State) (state.State, error) {
+		return components.Set(st, a.TargetManifest(), kind, name, enabled)
+	})
+	if err != nil {
 		return "", err
 	}
-	// Outside the lock: it fetches the manifest.
-	report := upgrade.Refresh(upgrade.CheckOptions{
-		State:  a.cfg.StatePath,
-		Output: a.cfg.ResolvedUpgradesPath(),
-	})
-	a.changes.Changed("upgrade", "components")
+	report := a.refresh()
 	label := components.LabelOf(a.TargetManifest(), kind, name)
 	switch {
 	case !enabled:
@@ -30,14 +28,49 @@ func (a *App) SetComponent(kind components.Kind, name string, enabled bool) (str
 	}
 }
 
-func (a *App) writeComponent(kind components.Kind, name string, enabled bool) error {
+// SetAudioserver picks the audio server; the switch waits for apply, which
+// the refreshed upgrades.json then offers.
+func (a *App) SetAudioserver(name string) (string, error) {
+	err := a.writeState(func(st state.State) (state.State, error) {
+		return components.SetAudioserver(st, a.TargetManifest(), name)
+	})
+	if err != nil {
+		return "", err
+	}
+	a.refresh()
+	st, err := a.ReadState()
+	if err != nil {
+		return "", &UserError{Msg: stateErrorMsg(a.cfg.StatePath, err)}
+	}
+	man := a.TargetManifest()
+	msg := "Audio server: " + components.LabelOf(man, components.Role, name)
+	if as := components.AudioserverOf(st, man); as.Switching() {
+		return msg + " — it replaces " + components.LabelOf(man, components.Role, as.Installed) +
+			" on the next upgrade (apply it below).", nil
+	}
+	return msg + ".", nil
+}
+
+// refresh keeps upgrades.json in step with a change of state.json, outside
+// the state lock: it may fetch the manifest.
+func (a *App) refresh() *upgrade.Report {
+	report := upgrade.Refresh(upgrade.CheckOptions{
+		State:  a.cfg.StatePath,
+		Output: a.cfg.ResolvedUpgradesPath(),
+	})
+	a.changes.Changed("upgrade", "components")
+	return report
+}
+
+// writeState applies change to state.json under the state lock.
+func (a *App) writeState(change func(state.State) (state.State, error)) error {
 	a.stateMu.Lock()
 	defer a.stateMu.Unlock()
 	st, err := a.ReadState()
 	if err != nil {
 		return &UserError{Msg: stateErrorMsg(a.cfg.StatePath, err)}
 	}
-	next, err := components.Set(st, a.TargetManifest(), kind, name, enabled)
+	next, err := change(st)
 	if err != nil {
 		return &UserError{Msg: err.Error()}
 	}

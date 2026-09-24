@@ -46,6 +46,7 @@ func NewHandler(app *App) http.Handler {
 	mux.HandleFunc("GET /events", h.events)
 	mux.HandleFunc("POST /components", h.form(h.setComponent))
 	mux.HandleFunc("POST /components/action", h.form(h.componentAction))
+	mux.HandleFunc("POST /components/audioserver", h.form(h.setAudioserver))
 	mux.HandleFunc("POST /dac", h.form(h.setDAC))
 	mux.HandleFunc("POST /dac/unset", h.form(h.unsetDAC))
 	mux.HandleFunc("POST /upgrade", h.form(h.startUpgrade))
@@ -130,6 +131,11 @@ func (h *handler) setComponent(form url.Values, _ string) (string, *ActionResult
 		return "", nil, err
 	}
 	msg, err := h.app.SetComponent(kind, form.Get("name"), form.Get("enabled") == "1")
+	return msg, nil, err
+}
+
+func (h *handler) setAudioserver(form url.Values, _ string) (string, *ActionResult, error) {
+	msg, err := h.app.SetAudioserver(form.Get("name"))
 	return msg, nil, err
 }
 
