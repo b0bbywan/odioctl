@@ -108,11 +108,12 @@ since rewritten in Go.
   lights up and `apply` does not refuse. Disabling is never pending.
   The `Report` struct's field order and json tags are the wire format.
 - **The catalog is the target manifest's `catalog`, and only it**
-  (`components.roleInfo`/`featureInfo`): the roles, their features (nested
-  under their parent), description, group, opt-in, required and archs come from
-  the release, so a new odios role or feature needs no odioctl release. What
-  odios ships but holds out of its catalog (`<role>_catalog: false`, pipewire)
-  is not offered. Only `Actions` are odioctl's (`roleActions`/`featureActions`).
+  (`components.roleInfo`/`featureInfo`): the roles, their version
+  (`Manifest.RoleVersion`), their features (nested under their parent),
+  description, group, opt-in, required and archs come from the release, so a
+  new odios role or feature needs no odioctl release. The manifest's `roles` is
+  there for the odioctl that predate this and is never read: what odios holds
+  out of its catalog (`<role>_catalog: false`, pipewire) does not ship here. Only `Actions` are odioctl's (`roleActions`/`featureActions`).
   The label is the catalog's too, the name capitalized when it has none
   (`components.nameLabel`: shairport_sync reads Shairport-sync). Without a cached
   manifest (no check yet) what state.json names is listed and nothing toggles:
