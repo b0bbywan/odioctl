@@ -74,7 +74,7 @@ func (a *App) resolveAction(kind components.Kind, name, id string) (components.A
 			return action, nil
 		}
 	}
-	return action, userErrorf("%s is not installed", components.LabelOf(kind, name))
+	return action, userErrorf("%s is not installed", components.LabelOf(a.TargetManifest(), kind, name))
 }
 
 // RunAction starts a catalog action and returns (banner, modal).

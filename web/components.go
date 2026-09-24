@@ -19,7 +19,7 @@ func (a *App) SetComponent(kind components.Kind, name string, enabled bool) (str
 		Output: a.cfg.ResolvedUpgradesPath(),
 	})
 	a.changes.Changed("upgrade", "components")
-	label := components.LabelOf(kind, name)
+	label := components.LabelOf(a.TargetManifest(), kind, name)
 	switch {
 	case !enabled:
 		return label + " disabled — it stays installed but will no longer be updated.", nil

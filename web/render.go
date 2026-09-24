@@ -130,14 +130,10 @@ func rowViewOf(app *App, c components.Component, child bool) rowView {
 	if c.Enabled() {
 		enable = "0"
 	}
-	description := c.Description
-	if description == "" {
-		description = c.Name
-	}
 	row := rowView{
 		Child:       child,
 		Label:       c.Label,
-		Description: description,
+		Description: c.Description,
 		Status:      string(c.Status),
 		Title:       title,
 		Required:    !c.Toggleable,
@@ -264,7 +260,7 @@ func upgradeViewOf(app *App, report *upgrade.Report) upgradeView {
 	}
 	for _, ref := range report.PendingComponents {
 		kind, name, _ := strings.Cut(ref, ":")
-		view.Items = append(view.Items, "install "+components.LabelOf(components.Kind(kind), name))
+		view.Items = append(view.Items, "install "+components.LabelOf(&report.Manifest, components.Kind(kind), name))
 	}
 	return view
 }

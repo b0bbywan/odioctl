@@ -30,10 +30,27 @@ const stateJSON = `{
     "release_history": ["2026.5.0"]
 }`
 
+// The last check's report, whose manifest `components` reads the catalog from.
+const upgradesJSON = `{
+    "current": "2026.5.0", "latest": "2026.5.0", "target_tag": "2026.5.0",
+    "manifest": {"odios": "2026.5.0",
+        "roles": {"mpd": "2026.5.0", "common": "2026.5.0", "spotifyd": "2026.5.0", "upmpdcli": "2026.5.0"},
+        "catalog": {
+            "mpd": {"description": "Music Player Daemon", "group": "Playback", "required": true},
+            "common": {"description": "Core configuration", "group": "System", "required": true},
+            "spotifyd": {"description": "Spotify Connect endpoint", "group": "Streaming"},
+            "upmpdcli": {"description": "UPnP / OpenHome renderer", "group": "Streaming",
+                "features": {"tidal": {"description": "Tidal streaming"}}}}}
+}`
+
+// writeStateFile writes state.json and, next to it, upgrades.json.
 func writeStateFile(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "state.json")
 	if err := os.WriteFile(path, []byte(stateJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(state.UpgradesPathFor(path), []byte(upgradesJSON), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	return path

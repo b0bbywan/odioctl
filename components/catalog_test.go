@@ -1,20 +1,18 @@
 package components
 
 import (
-	"reflect"
 	"slices"
 	"testing"
 
 	"github.com/b0bbywan/odioctl/manifest"
 )
 
-// withCatalog is a release shipping mpd and newrole, a role odioctl's own
-// catalog does not know, described by the manifest alone.
+// withCatalog is a release shipping mpd, qbzd and newrole, described by meta.
 func withCatalog(meta manifest.RoleMeta) *manifest.Manifest {
-	return &manifest.Manifest{
-		Roles:   map[string]string{"mpd": "x", "qbzd": "x", "newrole": "x"},
-		Catalog: map[string]manifest.RoleMeta{"newrole": meta},
-	}
+	man := shipping("mpd", "qbzd")
+	man.Roles["newrole"] = "x"
+	man.Catalog["newrole"] = meta
+	return man
 }
 
 func listed(t *testing.T, comps []Component, name string) Component {
@@ -28,12 +26,12 @@ func listed(t *testing.T, comps []Component, name string) Component {
 	return Component{}
 }
 
-func TestManifestCatalogListsARoleTheLocalCatalogLacks(t *testing.T) {
+func TestTheCatalogListsARoleOdioctlHasNeverHeardOf(t *testing.T) {
 	st := makeState()
 	st.Roles = map[string]string{"mpd": "1"}
 	man := withCatalog(manifest.RoleMeta{Description: "From the release", Group: "Playback", OptIn: true})
 	c := listed(t, List(st, man), "newrole")
-	if c.Label != "newrole" || c.Description != "From the release" || c.Group != "Playback" || c.Status != Excluded {
+	if c.Description != "From the release" || c.Group != "Playback" || c.Status != Excluded {
 		t.Errorf("newrole = %+v", c)
 	}
 	if p := Pending(st, man); slices.Contains(p, "role:newrole") {
@@ -69,11 +67,11 @@ func TestManifestRoleWithoutOptInGoesPending(t *testing.T) {
 	}
 }
 
-func TestManifestOverridesDescriptionGroupOptInButNotLabelOrActions(t *testing.T) {
+func TestTheCatalogDescribesARoleOdioctlGivesItsActions(t *testing.T) {
 	man := withCatalog(manifest.RoleMeta{})
 	man.Catalog["qbzd"] = manifest.RoleMeta{Description: "Released", Group: "System"}
 	info, ok := roleInfo(man, "qbzd")
-	if !ok || info.Label != "Qobuz Connect" || info.Description != "Released" ||
+	if !ok || info.Description != "Released" ||
 		info.Group != "System" || info.OptIn || len(info.Actions) != 1 {
 		t.Errorf("qbzd = %+v", info)
 	}
@@ -86,17 +84,29 @@ func TestManifestUnknownGroupIsIgnored(t *testing.T) {
 	if g := listed(t, comps, "newrole").Group; g != Groups[len(Groups)-1] {
 		t.Errorf("newrole group = %q", g)
 	}
-	if g := listed(t, comps, "qbzd").Group; g != "Streaming" {
+	if g := listed(t, comps, "qbzd").Group; g != Groups[len(Groups)-1] {
 		t.Errorf("qbzd group = %q", g)
 	}
 }
 
-func TestManifestWithoutCatalogIsTheLocalCatalog(t *testing.T) {
-	man := &manifest.Manifest{Roles: map[string]string{"qbzd": "x"}}
-	remote, _ := roleInfo(man, "qbzd")
-	local, _ := roleInfo(nil, "qbzd")
-	if !reflect.DeepEqual(remote, local) {
-		t.Errorf("roleInfo = %+v, want %+v", remote, local)
+// What the release ships but holds out of its catalog (pipewire, until
+// odioctl can offer it) is not offered here either.
+func TestAShippedRoleOutOfTheCatalogIsNotListed(t *testing.T) {
+	man := withCatalog(manifest.RoleMeta{})
+	man.Roles["pipewire"] = "x"
+	if lists(List(makeState(), man), "pipewire") {
+		t.Error("pipewire listed")
+	}
+}
+
+func TestAFeatureIsTheCatalogsUnderItsRole(t *testing.T) {
+	man := withCatalog(manifest.RoleMeta{Features: map[string]manifest.FeatureMeta{"newplugin": {Description: "Plugged"}}})
+	info, ok := featureInfo(man, "newplugin")
+	if !ok || info.Parent != "newrole" || info.Description != "Plugged" {
+		t.Errorf("newplugin = %+v, %v", info, ok)
+	}
+	if _, ok := featureInfo(nil, "newplugin"); ok {
+		t.Error("a feature without a release")
 	}
 }
 

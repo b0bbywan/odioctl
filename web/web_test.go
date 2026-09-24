@@ -75,13 +75,25 @@ func newFixture(t *testing.T) *fixture {
 	dac.RebootFlag = filepath.Join(f.dir, "reboot-required")
 	t.Cleanup(func() { dac.RebootFlag = oldFlag })
 
-	// No network: `upgrade.Refresh` after a toggle sees this manifest.
+	// No network: `upgrade.Refresh` sees this manifest, whose catalog says
+	// what the page offers.
 	oldFetch := manifest.Fetch
 	manifest.Fetch = func(string) (*manifest.Manifest, error) {
 		return &manifest.Manifest{Odios: "2026.5.0",
-			Roles: map[string]string{"mpd": "1", "common": "1", "qbzd": "1", "spotifyd": "1"}}, nil
+			Roles: map[string]string{"mpd": "1", "common": "1", "qbzd": "1", "spotifyd": "1"},
+			Catalog: map[string]manifest.RoleMeta{
+				"mpd": {Label: "MPD", Description: "Music library", Group: "Playback", Required: true,
+					Features: map[string]manifest.FeatureMeta{"mympd": {Label: "myMPD", Description: "Web player"}}},
+				"common": {Label: "Base system", Description: "Core system configuration", Group: "System",
+					Required: true},
+				"qbzd": {Label: "Qobuz Connect", Description: "Play from the Qobuz app (experimental)",
+					Group: "Streaming", OptIn: true},
+				"spotifyd": {Label: "Spotify Connect", Description: "Play from the Spotify app", Group: "Streaming"},
+			}}, nil
 	}
 	t.Cleanup(func() { manifest.Fetch = oldFetch })
+	// a check has run, as on any odio: the catalog is there
+	upgrade.Refresh(upgrade.CheckOptions{State: f.statePath, Output: state.UpgradesPathFor(f.statePath)})
 
 	f.script = "echo 'paste this URL:'; echo '  https://qobuz.test/oauth?id=1'; sleep 30"
 	// the user manager's runtime dir, where a fakeUnit leaves its invocation link
@@ -281,7 +293,7 @@ func TestIndexRendersComponentsAndDac(t *testing.T) {
 	if code != 200 {
 		t.Fatalf("code = %d", code)
 	}
-	wants(t, body, "MPD", "Spotify Connect", "hifiberry-dacplus-std",
+	wants(t, body, "<b>MPD</b><small>Music library</small>", "Spotify Connect", "hifiberry-dacplus-std",
 		"odio 2026.5.0", f.app.Token())
 	if strings.Contains(body, "State: installed") {
 		t.Error("raw status leaked")
@@ -667,13 +679,22 @@ func TestComponentNotInstalledIsRefused(t *testing.T) {
 	}
 }
 
+// Before any check there is no catalog: the rows are shown, none toggles.
+func TestNoCheckYetShowsTheStateWithoutToggles(t *testing.T) {
+	f := newFixture(t)
+	os.Remove(state.UpgradesPathFor(f.statePath))
+	_, body := f.get("/")
+	wants(t, body, "No upgrade check yet", `id="row-role-spotifyd"`)
+	if strings.Contains(body, `hx-post="components"`) {
+		t.Error("a toggle without a catalog")
+	}
+}
+
 func TestUpgradeSection(t *testing.T) {
 	f := newFixture(t)
-	_, body := f.get("/")
-	wants(t, body, "No upgrade check yet")
-	// a toggle refreshes upgrades.json; disabling mpd leaves nothing pending
+	// a toggle refreshes upgrades.json; disabling mympd leaves nothing pending
 	f.post("/components", url.Values{"kind": {"feature"}, "name": {"mympd"}, "enabled": {"0"}}, true)
-	_, body = f.get("/")
+	_, body := f.get("/")
 	if !strings.Contains(body, "Up to date") && !strings.Contains(body, "Apply now") {
 		t.Error("upgrade section missing")
 	}
