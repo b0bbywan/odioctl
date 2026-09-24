@@ -61,14 +61,25 @@ func EnvVersion() string {
 // Manifest is the schema of a release manifest.json (built by odios'
 // scripts/build-manifest.py).
 type Manifest struct {
-	Odios   string              `json:"odios"`
+	Odios string `json:"odios"`
+	// Only for the odioctl that predate the catalog's versions: never read.
 	Roles   map[string]string   `json:"roles"`
 	Catalog map[string]RoleMeta `json:"catalog,omitempty"`
+}
+
+// RoleVersion is the version of role this release ships, "" when it does not.
+func (m Manifest) RoleVersion(role string) string { return m.Catalog[role].Version }
+
+// Ships reports whether the release's catalog lists role.
+func (m Manifest) Ships(role string) bool {
+	_, ok := m.Catalog[role]
+	return ok
 }
 
 // RoleMeta is a role's catalog entry as odios publishes it; actions are never
 // part of it, an argv does not come from a downloaded file.
 type RoleMeta struct {
+	Version     string   `json:"version,omitempty"`
 	Label       string   `json:"label,omitempty"` // the name the user knows; "" = the role's
 	Description string   `json:"description"`
 	Group       string   `json:"group"`

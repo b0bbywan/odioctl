@@ -176,6 +176,23 @@ func TestFetchReadsTheLabelsAndTheFeaturesUnderTheirRole(t *testing.T) {
 	}
 }
 
+// The catalog alone says what ships and at which version: roles is only for
+// the odioctl that predate it.
+func TestRoleVersionIsTheCatalogs(t *testing.T) {
+	m := Manifest{
+		Roles:   map[string]string{"mpd": "old", "pipewire": "2"},
+		Catalog: map[string]RoleMeta{"mpd": {Version: "3"}},
+	}
+	for role, want := range map[string]string{"mpd": "3", "pipewire": "", "nope": ""} {
+		if got := m.RoleVersion(role); got != want {
+			t.Errorf("RoleVersion(%q) = %q, want %q", role, got, want)
+		}
+	}
+	if !m.Ships("mpd") || m.Ships("pipewire") {
+		t.Error("Ships is the catalog's")
+	}
+}
+
 func TestFetchReturnsTheError(t *testing.T) {
 	srv := httptest.NewServer(http.NotFoundHandler())
 	defer srv.Close()
