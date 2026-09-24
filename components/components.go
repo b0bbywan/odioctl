@@ -131,12 +131,12 @@ func roleNames(st state.State, man *manifest.Manifest) map[string]bool {
 	return names
 }
 
-// roleShown hides the audio server odio does not run, a role not for this
-// architecture unless installed or requested here (roles_excluded lists it on
-// every odio install.sh skipped it on), and one the release does not ship
-// unless state.json names it.
+// roleShown hides the audio servers (a choice, see AudioserverOf), a role not
+// for this architecture unless installed or requested here (roles_excluded
+// lists it on every odio install.sh skipped it on), and one the release does
+// not ship unless state.json names it.
 func roleShown(st state.State, man *manifest.Manifest, name string) bool {
-	if name == otherAudioserver(st.Audioserver) {
+	if isAudioserver(name) {
 		return false
 	}
 	_, inRoles := st.Roles[name]
@@ -148,14 +148,6 @@ func roleShown(st state.State, man *manifest.Manifest, name string) bool {
 		return ships || stateHasRole(st, name)
 	}
 	return true
-}
-
-// The other audio server: odio runs one of the two, state.json says which.
-func otherAudioserver(picked string) string {
-	if picked == state.PipeWire {
-		return state.PulseAudio
-	}
-	return state.PipeWire
 }
 
 // featureNames lists the catalog's features whose parent is among roles, and
@@ -267,6 +259,9 @@ func checkSet(st state.State, man *manifest.Manifest, kind Kind, name string, en
 	}
 	if man == nil {
 		return errorf("no release catalog yet: run `odioctl upgrade check` first")
+	}
+	if kind == Role && isAudioserver(name) {
+		return errorf("the audio server is a choice, not a toggle: odioctl components set audioserver %s", name)
 	}
 	if kind == Role {
 		info, ok := roleInfo(man, name)

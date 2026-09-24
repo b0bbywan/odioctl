@@ -6,7 +6,8 @@ import (
 )
 
 // Pending lists what the next `upgrade apply` would install, as ["role:mpd",
-// "feature:mympd", …] in catalog order. Disabling is never pending.
+// "feature:mympd", …] in List's order, a switched audio server first.
+// Disabling is never pending.
 func Pending(st state.State, man *manifest.Manifest) []string {
 	var refs []string
 	for _, c := range pending(st, man) {
@@ -42,6 +43,10 @@ func pending(st state.State, man *manifest.Manifest) []Component {
 		return ok
 	}
 	var pending []Component
+	// A switch installs the picked server: apply then runs every role.
+	if a := AudioserverOf(st, man); man != nil && a.Switching() {
+		pending = append(pending, roleComponent(st, man, a.Picked))
+	}
 	pendingRoles := map[string]bool{}
 	for _, c := range List(st, man) {
 		switch {

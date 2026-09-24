@@ -69,15 +69,10 @@ func DeriveInstallEnv(st state.State) map[string]string {
 	return env
 }
 
-var audioservers = []string{state.PulseAudio, state.PipeWire}
-
 // switchingAudioserver: another server than the picked one is installed. Every
 // role built on the server follows it, so none may be skipped.
 func switchingAudioserver(st state.State) bool {
-	if st.Roles[st.Audioserver] != "" {
-		return false
-	}
-	return slices.ContainsFunc(audioservers, func(s string) bool { return st.Roles[s] != "" })
+	return components.AudioserverOf(st, nil).Switching()
 }
 
 // DeriveRunEnv emits RUN_X=N for roles already at the target version and not

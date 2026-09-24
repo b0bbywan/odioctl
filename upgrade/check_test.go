@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/b0bbywan/odioctl/manifest"
+	"github.com/b0bbywan/odioctl/state"
 )
 
 func TestComputeRoleUpgrades(t *testing.T) {
@@ -89,6 +90,19 @@ func TestPendingComponentAloneMakesUpgradeAvailable(t *testing.T) {
 	r := buildReport(st, man("2026.5.0", map[string]string{"mpd": "2026.5.0"}), "")
 	if !r.UpgradeAvailable || !reflect.DeepEqual(r.PendingComponents, []string{"feature:mympd"}) ||
 		len(r.Roles) != 0 {
+		t.Errorf("report = %+v", r)
+	}
+}
+
+// Picking the other audio server is something to apply, like a new role.
+func TestAudioserverSwitchMakesUpgradeAvailable(t *testing.T) {
+	st := makeState()
+	st.Audioserver = state.PipeWire
+	st.Roles = map[string]string{"mpd": "2026.5.0", "pulseaudio": "2026.5.0"}
+	st.Features = []string{"mympd"}
+	m := man("2026.5.0", map[string]string{"mpd": "2026.5.0", "pulseaudio": "2026.5.0", "pipewire": "2026.5.0"})
+	r := buildReport(st, m, "")
+	if !r.UpgradeAvailable || !reflect.DeepEqual(r.PendingComponents, []string{"role:pipewire"}) {
 		t.Errorf("report = %+v", r)
 	}
 }

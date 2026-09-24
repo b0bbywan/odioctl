@@ -100,7 +100,7 @@ func TestListOrder(t *testing.T) {
 	for _, c := range List(makeState(), shipping("pulseaudio", "bluetooth", "mpd", "spotifyd", "shairport_sync")) {
 		got = append(got, c.Name)
 	}
-	want := []string{"bluetooth", "pulseaudio", "mpd", "shairport_sync", "spotifyd", "mympd"}
+	want := []string{"bluetooth", "mpd", "shairport_sync", "spotifyd", "mympd"}
 	if !slices.Equal(got, want) {
 		t.Errorf("List = %v, want %v", got, want)
 	}
@@ -251,26 +251,6 @@ func TestInfraRoleRejected(t *testing.T) {
 	st := makeState()
 	st.Roles = map[string]string{"common": "1"}
 	_, err := Set(st, release(), Role, "common", false)
-	wantComponentError(t, err)
-}
-
-// The server odio does not run is not a row, and would otherwise read as
-// pending for ever: it is in neither of state.json's lists.
-func TestOnlyThePickedAudioserverIsListed(t *testing.T) {
-	st := makeState()
-	st.Audioserver = state.PipeWire
-	st.Roles = map[string]string{"pipewire": "1"}
-	m := byName(List(st, release()))
-	if _, listed := m[[2]string{"role", "pulseaudio"}]; listed {
-		t.Error("pulseaudio listed")
-	}
-	if c := m[[2]string{"role", "pipewire"}]; c.Status != Installed || c.Toggleable {
-		t.Errorf("pipewire = %+v", c)
-	}
-	if slices.Contains(Pending(st, release()), "role:pulseaudio") {
-		t.Error("pulseaudio pending")
-	}
-	_, err := Set(st, release(), Role, "pipewire", false)
 	wantComponentError(t, err)
 }
 
