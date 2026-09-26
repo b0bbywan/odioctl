@@ -1,4 +1,4 @@
 <div id="row-audioserver" class="card">
   <div class="content"><b>Audio server</b><small>{{.Description}}</small>{{if .Note}}<small class="action">{{.Note}}</small>{{end}}</div>
-  <div class="meta">{{if .Choosable}}<form class="choice" hx-post="components/audioserver" hx-target="#notice" hx-swap="innerHTML"><input type="hidden" name="token" value="{{.Token}}"><select name="name" aria-label="Audio server">{{range .Options}}<option value="{{.Name}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}</select><button class="small" type="submit">Switch</button></form>{{end}}</div>
+  <div class="meta">{{if .Choosable}}<form class="choice" hx-post="components/audioserver" hx-target="#notice" hx-swap="innerHTML"><input type="hidden" name="token" value="{{.Token}}"><select name="name" aria-label="Audio server">{{range .Options}}<option value="{{.Name}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}</select><button class="small" type="submit">Switch</button></form>{{else}}<span class="state lock" title="Audio server — required by odio" aria-label="Audio server — required by odio">{{template "icon-lock"}}</span>{{end}}</div>
 </div>

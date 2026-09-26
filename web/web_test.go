@@ -711,7 +711,8 @@ func TestNoCheckYetShowsTheStateWithoutToggles(t *testing.T) {
 	f := newFixture(t)
 	os.Remove(state.UpgradesPathFor(f.statePath))
 	_, body := f.get("/")
-	wants(t, body, "No upgrade check yet", `id="row-role-spotifyd"`)
+	// the audio server that cannot be switched is locked, like a required role
+	wants(t, body, "No upgrade check yet", `id="row-role-spotifyd"`, `title="Audio server — required by odio"`)
 	if strings.Contains(body, `hx-post="components"`) || strings.Contains(body, `hx-post="components/audioserver"`) {
 		t.Error("a toggle without a catalog")
 	}
