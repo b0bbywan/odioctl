@@ -9,7 +9,7 @@ updates:
 
   # Dev tooling only (ruff, mypy, pytest): the runtime has no dependencies
   # and ships as a .deb, so this is about the uv.lock, not the package.
-  - package-ecosystem: uv
+  - package-ecosystem: gomod
     directory: /
     schedule:
       interval: weekly
