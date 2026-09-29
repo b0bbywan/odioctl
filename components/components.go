@@ -27,6 +27,7 @@ const (
 	Installed Status = "installed"
 	Excluded  Status = "excluded"
 	Default   Status = "default"
+	Removing  Status = "removing" // disabled but still installed, until apply
 )
 
 // Error reports an invalid component operation (unknown name/kind, infra role).
@@ -51,21 +52,26 @@ type Component struct {
 	Actions          []Action
 }
 
-func (c Component) Enabled() bool { return c.Status != Excluded }
+func (c Component) Enabled() bool { return c.Status != Excluded && c.Status != Removing }
 
 // RequestedVersion marks an opt-in role enabled but not installed yet: in
 // Roles (so INSTALL_X=Y is emitted) but out of the version comparisons.
 const RequestedVersion = ""
 
+// A role in both Roles (with its version) and RolesExcluded is disabled but
+// still installed: apply removes it. Features likewise.
 func roleStatus(st state.State, man *manifest.Manifest, name string) Status {
-	if v, ok := st.Roles[name]; ok {
-		if v != "" {
-			return Installed
-		}
-		return Default // opted in here, installs on the next apply
-	}
-	if slices.Contains(st.RolesExcluded, name) {
+	v, inRoles := st.Roles[name]
+	excluded := slices.Contains(st.RolesExcluded, name)
+	switch {
+	case inRoles && v != "" && excluded:
+		return Removing
+	case excluded:
 		return Excluded
+	case inRoles && v != "":
+		return Installed
+	case inRoles:
+		return Default // opted in here, installs on the next apply
 	}
 	if info, ok := roleInfo(man, name); ok && info.OptIn {
 		return Excluded // install.sh answers N: neither list means off, not default
@@ -74,13 +80,22 @@ func roleStatus(st state.State, man *manifest.Manifest, name string) Status {
 }
 
 func featureStatus(st state.State, name string) Status {
-	if slices.Contains(st.Features, name) {
+	in, excluded := slices.Contains(st.Features, name), slices.Contains(st.FeaturesExcluded, name)
+	switch {
+	case in && excluded:
+		return Removing
+	case excluded:
+		return Excluded
+	case in:
 		return Installed
 	}
-	if slices.Contains(st.FeaturesExcluded, name) {
-		return Excluded
-	}
 	return Default
+}
+
+// roleOn: installed or about to be, and not on its way out.
+func roleOn(st state.State, name string) bool {
+	_, ok := st.Roles[name]
+	return ok && !slices.Contains(st.RolesExcluded, name)
 }
 
 // List returns roles by group then label, then features. man is the
@@ -236,9 +251,10 @@ func kindOf(st state.State, man *manifest.Manifest, name string) Kind {
 	return Feature
 }
 
-// Set returns a copy of st with name opted in or out. Disabling moves a role
-// into RolesExcluded; enabling clears the exclusion, and records an opt-in
-// role with RequestedVersion (install.sh would answer its [y/N] with N).
+// Set returns a copy of st with name opted in or out. Disabling adds the
+// exclusion and keeps what is installed, for apply to remove (Removals);
+// enabling clears the exclusion, and records an opt-in role with
+// RequestedVersion (install.sh would answer its [y/N] with N).
 func Set(st state.State, man *manifest.Manifest, kind Kind, name string, enabled bool) (state.State, error) {
 	if err := checkSet(st, man, kind, name, enabled); err != nil {
 		return state.State{}, err
@@ -279,7 +295,9 @@ func checkSet(st state.State, man *manifest.Manifest, kind Kind, name string, en
 
 func setRole(st *state.State, man *manifest.Manifest, name string, enabled bool) {
 	if !enabled {
-		delete(st.Roles, name)
+		if st.Roles[name] == RequestedVersion {
+			delete(st.Roles, name) // nothing installed to remove
+		}
 		st.RolesExcluded = with(st.RolesExcluded, name)
 		return
 	}
@@ -293,7 +311,6 @@ func setRole(st *state.State, man *manifest.Manifest, name string, enabled bool)
 
 func setFeature(st *state.State, name string, enabled bool) {
 	if !enabled {
-		st.Features = without(st.Features, name)
 		st.FeaturesExcluded = with(st.FeaturesExcluded, name)
 		return
 	}
@@ -315,5 +332,5 @@ func without(list []string, name string) []string {
 	return out
 }
 
-const ApplyNote = "Enabling installs on the next upgrade; disabling keeps the component " +
-	"installed but stops updating it."
+const ApplyNote = "Enabling installs on the next upgrade; disabling stops the component " +
+	"on the next upgrade."

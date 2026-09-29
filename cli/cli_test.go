@@ -141,7 +141,8 @@ func TestComponentsDisableAndEnableRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := st.Roles["spotifyd"]; ok || len(st.RolesExcluded) != 1 {
+	// installed until apply removes it
+	if _, ok := st.Roles["spotifyd"]; !ok || len(st.RolesExcluded) != 1 {
 		t.Errorf("state = %+v", st)
 	}
 	if rc, _, _ = run(t, "components", "--state", path, "enable", "spotifyd"); rc != 0 {

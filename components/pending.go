@@ -1,13 +1,16 @@
 package components
 
 import (
+	"maps"
+	"slices"
+
 	"github.com/b0bbywan/odioctl/manifest"
 	"github.com/b0bbywan/odioctl/state"
 )
 
 // Pending lists what the next `upgrade apply` would install, as ["role:mpd",
 // "feature:mympd", …] in List's order, a switched audio server first.
-// Disabling is never pending.
+// What it would remove is Removals'.
 func Pending(st state.State, man *manifest.Manifest) []string {
 	var refs []string
 	for _, c := range pending(st, man) {
@@ -49,11 +52,62 @@ func pending(st state.State, man *manifest.Manifest) []Component {
 				pendingRoles[c.Name] = true
 			}
 		case c.Status == Default && c.Parent != "":
-			_, parentOn := st.Roles[c.Parent]
-			if parentOn || pendingRoles[c.Parent] {
+			if roleOn(st, c.Parent) || pendingRoles[c.Parent] {
 				pending = append(pending, c)
 			}
 		}
 	}
 	return pending
+}
+
+// Removals is what the next `upgrade apply` disables, as odios' disable.yml
+// takes it: the roles, and the features of the roles that stay, each with its
+// role. A feature the catalog does not place cannot be run, and is left out.
+type Removals struct {
+	Roles    []string
+	Features map[string]string // feature → its role
+}
+
+func RemovalsOf(st state.State, man *manifest.Manifest) Removals {
+	r := Removals{Features: map[string]string{}}
+	for _, c := range List(st, man) {
+		switch {
+		case c.Status != Removing:
+		case c.Kind == Role:
+			r.Roles = append(r.Roles, c.Name)
+		case c.Parent != "" && !slices.Contains(r.Roles, c.Parent):
+			r.Features[c.Name] = c.Parent
+		}
+	}
+	return r
+}
+
+func (r Removals) Empty() bool { return len(r.Roles) == 0 && len(r.Features) == 0 }
+
+// Refs is r as upgrades.json lists it: ["role:x", "feature:y"], roles first.
+func (r Removals) Refs() []string {
+	refs := []string{}
+	for _, n := range r.Roles {
+		refs = append(refs, string(Role)+":"+n)
+	}
+	for _, n := range slices.Sorted(maps.Keys(r.Features)) {
+		refs = append(refs, string(Feature)+":"+n)
+	}
+	return refs
+}
+
+// Drop returns st once r is removed: out of Roles and Features, the
+// exclusions kept. A removed role's features go with it, not excluded, so
+// they come back with the role.
+func Drop(st state.State, man *manifest.Manifest, r Removals) state.State {
+	out := st.Clone()
+	for _, n := range r.Roles {
+		delete(out.Roles, n)
+	}
+	out.Features = slices.DeleteFunc(out.Features, func(f string) bool {
+		_, removed := r.Features[f]
+		info, _ := featureInfo(man, f)
+		return removed || (info.Parent != "" && slices.Contains(r.Roles, info.Parent))
+	})
+	return out
 }
