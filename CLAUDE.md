@@ -35,7 +35,8 @@ since rewritten in Go.
   script spawned a python3 at every login. odios keeps only the `~/.profile`
   hook. It never fails (exit 0): what is missing is left out.
 - **Test seams are explicit**: swappable package vars (`manifest.Fetch`,
-  `upgrade.runInstall`, `upgrade.Systemctl`, `dac.RebootFlag`) and injected
+  `upgrade.runInstall`, `upgrade.runDisable`, `upgrade.ReleaseDir`,
+  `upgrade.Systemctl`, `dac.RebootFlag`) and injected
   funcs (`web.Runners`).
   Tests live in the package they test and swap the seam with `t.Cleanup`;
   never reach around a seam to mock deeper.
@@ -100,13 +101,29 @@ since rewritten in Go.
   membership landed never has. `apply --progress` sets `XDG_RUNTIME_DIR` to
   the target user's itself, sudo's `env_keep` is not relied on.
 - **upgrades.json is the contract with odio-ui and `upgrade apply`.** `check`
-  sets `upgrade_available` on a version bump *or* on `pending_components`
-  (enabled-but-not-installed, see `components.Pending`); the web UI calls
-  `upgrade.Refresh` after every toggle (from the cached manifest, fetching
-  only when nothing is cached for the target tag — a toggle is not a network
-  check, and a cache is never re-stamped with another tag) so the badge
-  lights up and `apply` does not refuse. Disabling is never pending.
+  sets `upgrade_available` on a version bump, on `pending_components`
+  (enabled-but-not-installed, see `components.Pending`) *or* on
+  `pending_removals` (disabled-but-installed, `components.RemovalsOf`); the
+  web UI calls `upgrade.Refresh` after every toggle (from the cached
+  manifest, fetching only when nothing is cached for the target tag — a
+  toggle is not a network check, and a cache is never re-stamped with
+  another tag) so the badge lights up and `apply` does not refuse.
   The `Report` struct's field order and json tags are the wire format.
+- **A disable waits for `apply`, like an enable.** The toggle only adds the
+  exclusion: a role in both `roles` (its version) and `roles_excluded` is
+  `Removing`, a feature likewise; re-enabling just clears it. `apply`
+  gathers the removals before any run and hands them to odios'
+  `disable.yml` (stop the units, the role's hook, replay odio_api), from
+  the release install.sh keeps in `upgrade.ReleaseDir`
+  (`/var/lib/odio/release`), offline: `target_user` and the names only,
+  odios derives the rest from state.json, so a removal must stay in
+  `roles`/`features` until it ran. The kept release disables first, and a
+  removal alone never runs install.sh; one kept before `disable.yml` gets
+  install.sh first, then the new release's. On success odioctl, not
+  odios, drops the removed names from state.json (a role's features with
+  it, not excluded) and refreshes upgrades.json; on failure they stay
+  pending. The names are checked (`componentName`): they end up in a path
+  odios reads as root.
 - **The catalog is the target manifest's `catalog`, and only it**
   (`components.roleInfo`/`featureInfo`): the roles, their version
   (`Manifest.RoleVersion`), their features (nested under their parent),
