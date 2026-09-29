@@ -49,24 +49,36 @@ var lookupUID = func(name string) (string, error) {
 	return u.Uid, nil
 }
 
-// DeriveInstallEnv emits INSTALL_X=N for the *_excluded lists and Y for
-// Roles/Features. A name in neither list is left unset so install.sh's own
-// defaults take over — that's how a later-added role self-installs.
+// DeriveInstallEnv emits Y for Roles/Features and N for the *_excluded lists,
+// N winning: a name in both is on its way out. A name in neither list is left
+// unset so install.sh's own defaults take over — that's how a later-added role
+// self-installs.
 func DeriveInstallEnv(st state.State) map[string]string {
 	env := map[string]string{}
-	for _, role := range st.RolesExcluded {
-		env["INSTALL_"+strings.ToUpper(role)] = "N"
-	}
-	for _, feature := range st.FeaturesExcluded {
-		env["INSTALL_"+strings.ToUpper(feature)] = "N"
-	}
 	for role := range st.Roles {
 		env["INSTALL_"+strings.ToUpper(role)] = "Y"
 	}
 	for _, feature := range st.Features {
 		env["INSTALL_"+strings.ToUpper(feature)] = "Y"
 	}
+	for _, role := range st.RolesExcluded {
+		env["INSTALL_"+strings.ToUpper(role)] = "N"
+	}
+	for _, feature := range st.FeaturesExcluded {
+		env["INSTALL_"+strings.ToUpper(feature)] = "N"
+	}
 	return env
+}
+
+// runtimeDirOf is targetUser's XDG_RUNTIME_DIR, where odio_progress finds
+// odio-api's socket: under sudo the environment's is dropped or the caller's.
+func runtimeDirOf(w io.Writer, targetUser string) (string, bool) {
+	uid, err := lookupUID(targetUser)
+	if err != nil {
+		fmt.Fprintf(w, "  progress: cannot resolve %s's uid (%v), leaving XDG_RUNTIME_DIR to the environment\n", targetUser, err)
+		return "", false
+	}
+	return "/run/user/" + uid, true
 }
 
 // switchingAudioserver: another server than the picked one is installed. Every
@@ -158,12 +170,8 @@ func buildApplyEnv(w io.Writer, st state.State, version, targetUser string, man 
 	}
 	if opts.Progress {
 		env["ODIOS_PROGRESS"] = "Y"
-		// The callback looks for odio-api's socket under XDG_RUNTIME_DIR;
-		// under sudo that is dropped or the caller's, so name the target's.
-		if uid, err := lookupUID(targetUser); err == nil {
-			env["XDG_RUNTIME_DIR"] = "/run/user/" + uid
-		} else {
-			fmt.Fprintf(w, "  progress: cannot resolve %s's uid (%v), leaving XDG_RUNTIME_DIR to the environment\n", targetUser, err)
+		if dir, ok := runtimeDirOf(w, targetUser); ok {
+			env["XDG_RUNTIME_DIR"] = dir
 		}
 	}
 
@@ -204,25 +212,23 @@ var runInstall = func(url string, env map[string]string) int {
 	return code
 }
 
-// RunApply re-runs install.sh from the target release with INSTALL_X derived
-// from state.json and RUN_X from the per-role manifest diff.
-func RunApply(stdout, stderr io.Writer, opts ApplyOptions) int {
-	statePath, st, ok := loadState(stdout, stderr, opts)
-	if !ok {
-		return 2
-	}
+// target is the release apply goes to, as resolveTarget settled it.
+type target struct {
+	version, url string
+	man          *manifest.Manifest
+	installs     bool // install.sh has something to do besides the removals
+}
 
-	// The report `check` wrote next to this state.json, read once: the gate,
-	// the target tag and the manifest. No report is "nothing to apply" — the
-	// release is decided by `check`, only --force/--version run without one.
-	upgradesPath := state.UpgradesPathFor(statePath)
-	report := ReadReport(upgradesPath)
+// resolveTarget follows the report `check` wrote next to state.json: the
+// gate, the tag and the manifest. No report is "nothing to apply" — the
+// release is decided by `check`, only --force/--version run without one.
+// Nil means stop, with rc.
+func resolveTarget(stdout, stderr io.Writer, st state.State, report *Report, opts ApplyOptions) (*target, int) {
 	if !opts.Force && !opts.Reinstall && opts.Version == "" &&
 		(report == nil || !report.UpgradeAvailable) {
 		fmt.Fprintln(stdout, "No upgrade reported in upgrades.json — use --force to override.")
-		return 0
+		return nil, 0
 	}
-
 	version := opts.Version
 	switch {
 	case version != "":
@@ -236,28 +242,82 @@ func RunApply(stdout, stderr io.Writer, opts ApplyOptions) int {
 	// could walk out of the odios release path.
 	if !manifest.IsReleaseTag(version) {
 		fmt.Fprintf(stdout, "Refusing target %q: not a release tag.\n", version)
-		return 2
+		return nil, 2
 	}
 	if versions.IsDowngrade(version, st.Odios) {
 		fmt.Fprintf(stdout, "Refusing to downgrade: target %s < installed %s.\n", version, st.Odios)
-		return 2
+		return nil, 2
 	}
 	url, err := manifest.InstallURL(version)
 	if err != nil {
 		fmt.Fprintf(stderr, "Error: %v\n", err)
-		return 2
+		return nil, 2
 	}
-	env := buildApplyEnv(stdout, st, version, st.TargetUser, targetManifest(report, version), opts)
+	return &target{
+		version:  version,
+		url:      url,
+		man:      targetManifest(report, version),
+		installs: opts.Force || opts.Reinstall || opts.Version != "" || report == nil || report.installs(),
+	}, 0
+}
 
-	fmt.Fprintf(stdout, "Upgrading to %s via %s\n", version, url)
+// install runs install.sh for t; removals is what disables after it.
+func install(stdout io.Writer, st state.State, t *target, removals components.Removals, opts ApplyOptions) int {
+	env := buildApplyEnv(stdout, st, t.version, st.TargetUser, t.man, opts)
+	fmt.Fprintf(stdout, "Upgrading to %s via %s\n", t.version, t.url)
 	fmt.Fprintln(stdout, "  env passed to install.sh:")
 	for _, k := range slices.Sorted(maps.Keys(env)) {
 		fmt.Fprintf(stdout, "    %s=%s\n", k, env[k])
 	}
-
+	if !removals.Empty() {
+		fmt.Fprintf(stdout, "Then disabling %s from the release installed\n", strings.Join(removals.Refs(), ", "))
+	}
 	if opts.DryRun {
 		fmt.Fprintln(stdout, "(dry-run, not invoking)")
 		return 0
 	}
-	return runInstall(url, env)
+	return runInstall(t.url, env)
+}
+
+// RunApply disables what state.json removes and re-runs install.sh from the
+// target release, INSTALL_X derived from state.json and RUN_X from the
+// per-role manifest diff.
+func RunApply(stdout, stderr io.Writer, opts ApplyOptions) int {
+	statePath, st, ok := loadState(stdout, stderr, opts)
+	if !ok {
+		return 2
+	}
+	t, rc := resolveTarget(stdout, stderr, st, ReadReport(state.UpgradesPathFor(statePath)), opts)
+	if t == nil {
+		return rc
+	}
+	// Gathered before any run: install.sh's state record drops them from
+	// Roles/Features, pending or not. The installed release disables them
+	// first when it can; otherwise the one install.sh brings does, after.
+	removals := components.RemovalsOf(st, t.man)
+	if !removals.Empty() && canDisable() {
+		if rc := disable(stdout, stderr, statePath, removals, t.man, opts); rc != 0 {
+			return rc
+		}
+		removals = components.Removals{}
+		if _, st, ok = loadState(io.Discard, stderr, opts); !ok {
+			return 2
+		}
+	}
+	if !t.installs && removals.Empty() {
+		fmt.Fprintln(stdout, "Nothing else to upgrade.")
+		if opts.DryRun {
+			fmt.Fprintln(stdout, "(dry-run, not invoking)")
+		}
+		return 0
+	}
+	if rc := install(stdout, st, t, removals, opts); rc != 0 || removals.Empty() || opts.DryRun {
+		return rc
+	}
+	if !canDisable() {
+		fmt.Fprintf(stdout, "The release installed has no disable.yml: %s left running.\n",
+			strings.Join(removals.Refs(), ", "))
+		return 0
+	}
+	return disable(stdout, stderr, statePath, removals, t.man, opts)
 }

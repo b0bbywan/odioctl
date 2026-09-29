@@ -34,6 +34,12 @@ func TestDeriveInstallEnv(t *testing.T) {
 	if len(DeriveInstallEnv(makeState())) != 0 {
 		t.Error("empty state should emit nothing")
 	}
+	// on its way out: excluded wins over installed
+	st.RolesExcluded = []string{"branding"}
+	st.FeaturesExcluded = []string{"tidal"}
+	if env := DeriveInstallEnv(st); env["INSTALL_BRANDING"] != "N" || env["INSTALL_TIDAL"] != "N" {
+		t.Errorf("env = %v", env)
+	}
 }
 
 func runManifest(roles map[string]string) *manifest.Manifest {
