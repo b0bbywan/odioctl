@@ -120,6 +120,8 @@ button.state:hover .act, button.state:focus-visible .act { display: inline-flex;
 .state.excluded .act { color: var(--lime); }
 .state.default .rest { color: var(--lime); }
 .state.default .act { color: var(--zinc-300); }
+.state.removing .rest { color: var(--red); }
+.state.removing .act { color: var(--leaf); }
 
 /* Waiting for the next upgrade: it breathes, it does not blink. */
 @keyframes pending-breath {

@@ -355,17 +355,18 @@ func TestDisableAndEnableRole(t *testing.T) {
 	if code != 200 {
 		t.Fatalf("code = %d", code)
 	}
-	wants(t, body, "Spotify Connect disabled")
+	wants(t, body, "Spotify Connect disabled — it will be removed by the next upgrade")
+	_, page := f.get("/")
+	wants(t, page, "Spotify Connect — removed on the next upgrade, click to keep", `class="state removing"`)
 	st := f.state()
-	if _, ok := st.Roles["spotifyd"]; ok || len(st.RolesExcluded) != 1 {
+	if _, ok := st.Roles["spotifyd"]; !ok || len(st.RolesExcluded) != 1 {
 		t.Errorf("state = %+v", st)
 	}
-	// upgrades.json refreshed: the pending disable never blocks, but the
-	// re-enable goes pending so `apply` will not refuse.
+	// Re-enabled before apply: still installed, nothing to do.
 	_, body = f.post("/components", url.Values{
 		"kind": {"role"}, "name": {"spotifyd"}, "enabled": {"1"},
 	}, true)
-	wants(t, body, "Spotify Connect enabled — it will be installed by the next upgrade")
+	wants(t, body, "Spotify Connect enabled.")
 }
 
 // The audio server is a select on its own row; picking the other one is a
@@ -521,7 +522,7 @@ func TestPostAnswersTheNoticeAndTheStreamTheState(t *testing.T) {
 		t.Errorf("code = %d, body = %q", code, body)
 	}
 	wants(t, body, `<div class="banner ok">Qobuz Connect disabled`)
-	batch = s.until("Qobuz Connect — disabled, click to enable")
+	batch = s.until("Qobuz Connect — removed on the next upgrade, click to keep")
 	wants(t, batch, "event: upgrade\n", "event: components\n", `<div id="row-role-qbzd" class="card">`)
 	if strings.Contains(batch, "event: dac\n") || strings.Contains(batch, "event: banners\n") {
 		t.Error("a toggle re-sent sections it does not touch")
