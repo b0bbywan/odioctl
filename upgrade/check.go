@@ -148,6 +148,11 @@ func printCheckSummary(w io.Writer, r Report) {
 	}
 }
 
+// installs: what apply runs install.sh for, UpgradeAvailable but the removals.
+func (r *Report) installs() bool {
+	return len(r.Roles) > 0 || len(r.PendingComponents) > 0 || versions.Compare(r.Latest, r.Current) > 0
+}
+
 // HasPending reports whether ref ("role:x" / "feature:y") is pending.
 func (r *Report) HasPending(ref string) bool {
 	return slices.Contains(r.PendingComponents, ref)
