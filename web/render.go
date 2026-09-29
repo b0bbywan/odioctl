@@ -302,6 +302,10 @@ func upgradeViewOf(app *App, report *upgrade.Report) upgradeView {
 		kind, name, _ := strings.Cut(ref, ":")
 		view.Items = append(view.Items, "install "+components.LabelOf(&report.Manifest, components.Kind(kind), name))
 	}
+	for _, ref := range report.PendingRemovals {
+		kind, name, _ := strings.Cut(ref, ":")
+		view.Items = append(view.Items, "remove "+components.LabelOf(&report.Manifest, components.Kind(kind), name))
+	}
 	return view
 }
 

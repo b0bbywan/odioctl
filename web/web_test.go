@@ -357,7 +357,8 @@ func TestDisableAndEnableRole(t *testing.T) {
 	}
 	wants(t, body, "Spotify Connect disabled — it will be removed by the next upgrade")
 	_, page := f.get("/")
-	wants(t, page, "Spotify Connect — removed on the next upgrade, click to keep", `class="state removing"`)
+	wants(t, page, "Spotify Connect — removed on the next upgrade, click to keep", `class="state removing"`,
+		"remove Spotify Connect")
 	st := f.state()
 	if _, ok := st.Roles["spotifyd"]; !ok || len(st.RolesExcluded) != 1 {
 		t.Errorf("state = %+v", st)

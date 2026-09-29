@@ -121,6 +121,26 @@ func TestPendingRolesLimitedToWhatTheManifestShips(t *testing.T) {
 	}
 }
 
+// A disabled role still installed is something to apply, and not upgraded.
+func TestPendingRemovalMakesUpgradeAvailable(t *testing.T) {
+	st := makeState()
+	st.Roles = map[string]string{"mpd": "2026.5.0", "spotifyd": "2026.4.0"}
+	st.RolesExcluded = []string{"spotifyd"}
+	st.Features = []string{"mympd"}
+	st.FeaturesExcluded = []string{"mympd"}
+	m := man("2026.5.0", map[string]string{"mpd": "2026.5.0", "spotifyd": "2026.5.0"})
+	r := buildReport(st, m, "")
+	if !r.UpgradeAvailable || len(r.Roles) != 0 || len(r.PendingComponents) != 0 ||
+		!reflect.DeepEqual(r.PendingRemovals, []string{"role:spotifyd", "feature:mympd"}) {
+		t.Errorf("report = %+v", r)
+	}
+	var out strings.Builder
+	printCheckSummary(&out, r)
+	if !strings.Contains(out.String(), "  role:spotifyd: pending removal\n") {
+		t.Errorf("summary = %q", out.String())
+	}
+}
+
 func TestOptInRoleOnlyGoesPendingOnceEnabled(t *testing.T) {
 	m := man("2026.9.0b1", map[string]string{"mpd": "2026.9.0b1", "qbzd": "2026.9.0b1"})
 	off := makeState()
