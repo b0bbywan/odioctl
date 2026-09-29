@@ -19,13 +19,29 @@ func (a *App) SetComponent(kind components.Kind, name string, enabled bool) (str
 	report := a.refresh()
 	label := components.LabelOf(a.TargetManifest(), kind, name)
 	switch {
+	case !enabled && a.removing(kind, name):
+		return label + " disabled — it will be removed by the next upgrade (apply it below).", nil
 	case !enabled:
-		return label + " disabled — it stays installed but will no longer be updated.", nil
+		return label + " disabled.", nil
 	case report != nil && report.HasPending(string(kind)+":"+name):
 		return label + " enabled — it will be installed by the next upgrade (apply it below).", nil
 	default:
 		return label + " enabled.", nil
 	}
+}
+
+// removing: disabled but still installed, for apply to remove.
+func (a *App) removing(kind components.Kind, name string) bool {
+	st, err := a.ReadState()
+	if err != nil {
+		return false
+	}
+	for _, c := range components.List(st, a.TargetManifest()) {
+		if c.Kind == kind && c.Name == name {
+			return c.Status == components.Removing
+		}
+	}
+	return false
 }
 
 // SetAudioserver picks the audio server; the switch waits for apply, which

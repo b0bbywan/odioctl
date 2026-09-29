@@ -134,6 +134,7 @@ var statusTitle = map[components.Status]string{
 	components.Installed: "%s — installed, click to disable",
 	components.Excluded:  "%s — disabled, click to enable",
 	components.Default:   "%s — installs on the next upgrade, click to skip",
+	components.Removing:  "%s — removed on the next upgrade, click to keep",
 }
 
 func rowViewOf(app *App, c components.Component, child bool) rowView {
