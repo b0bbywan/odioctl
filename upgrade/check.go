@@ -39,6 +39,7 @@ type Report struct {
 	UpgradeAvailable  bool              `json:"upgrade_available"`
 	Roles             []RoleUpgrade     `json:"roles"`
 	PendingComponents []string          `json:"pending_components"`
+	PendingRemovals   []string          `json:"pending_removals"`
 	Manifest          manifest.Manifest `json:"manifest"`
 	CheckedAt         string            `json:"checked_at"`
 }
@@ -64,7 +65,8 @@ func computeRoleUpgrades(st state.State, man manifest.Manifest) []RoleUpgrade {
 	for role, installed := range st.Roles {
 		// No version = enabled here, not installed yet: that's a pending
 		// component, not a role upgrade (components.RequestedVersion).
-		if installed == "" {
+		// Excluded = on its way out, never upgraded.
+		if installed == "" || slices.Contains(st.RolesExcluded, role) {
 			continue
 		}
 		available := man.RoleVersion(role)
@@ -84,16 +86,19 @@ func buildReport(st state.State, man manifest.Manifest, targetTag string) Report
 	if pending == nil {
 		pending = []string{}
 	}
+	removals := components.RemovalsOf(st, &man).Refs()
 	if targetTag == "" {
 		targetTag = man.Odios
 	}
 	return Report{
-		Current:           st.Odios,
-		Latest:            man.Odios,
-		TargetTag:         targetTag,
-		UpgradeAvailable:  len(upgrades) > 0 || versions.Compare(man.Odios, st.Odios) > 0 || len(pending) > 0,
+		Current:   st.Odios,
+		Latest:    man.Odios,
+		TargetTag: targetTag,
+		UpgradeAvailable: len(upgrades) > 0 || versions.Compare(man.Odios, st.Odios) > 0 ||
+			len(pending) > 0 || len(removals) > 0,
 		Roles:             upgrades,
 		PendingComponents: pending,
+		PendingRemovals:   removals,
 		Manifest:          man,
 		CheckedAt:         time.Now().UTC().Format("2006-01-02T15:04:05Z"),
 	}
@@ -138,6 +143,9 @@ func printCheckSummary(w io.Writer, r Report) {
 	for _, c := range r.PendingComponents {
 		fmt.Fprintf(w, "  %s: pending install\n", c)
 	}
+	for _, c := range r.PendingRemovals {
+		fmt.Fprintf(w, "  %s: pending removal\n", c)
+	}
 }
 
 // HasPending reports whether ref ("role:x" / "feature:y") is pending.
@@ -164,6 +172,9 @@ func ReadReport(path string) *Report {
 	}
 	if r.PendingComponents == nil {
 		r.PendingComponents = []string{}
+	}
+	if r.PendingRemovals == nil {
+		r.PendingRemovals = []string{} // a report from before removals
 	}
 	return &r
 }
