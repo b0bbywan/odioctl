@@ -177,21 +177,43 @@ func TestShippedDropsFeaturesOfADroppedParent(t *testing.T) {
 	}
 }
 
-func TestDisableRoleMovesItOutOfRolesAndIntoExcluded(t *testing.T) {
+// Disabling an installed role excludes it and keeps its version: apply
+// removes it.
+func TestDisableRoleLeavesItInstalledUntilApply(t *testing.T) {
 	st := makeState()
 	st.Roles = map[string]string{"mpd": "1", "spotifyd": "1"}
 	got, err := Set(st, release(), Role, "spotifyd", false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := got.Roles["spotifyd"]; ok {
-		t.Error("spotifyd should leave Roles")
+	if got.Roles["spotifyd"] != "1" {
+		t.Errorf("Roles = %v, spotifyd should keep its version", got.Roles)
 	}
 	if !slices.Equal(got.RolesExcluded, []string{"spotifyd"}) {
 		t.Errorf("RolesExcluded = %v", got.RolesExcluded)
 	}
-	if _, ok := st.Roles["spotifyd"]; !ok {
+	if c := role(t, got, "spotifyd"); c.Status != Removing || c.Enabled() {
+		t.Errorf("spotifyd = %+v", c)
+	}
+	if len(st.RolesExcluded) != 0 {
 		t.Error("original state mutated")
+	}
+}
+
+func TestEnableCancelsARemoval(t *testing.T) {
+	st := makeState()
+	st.Roles = map[string]string{"spotifyd": "1"}
+	st.Features = []string{"tidal"}
+	off, _ := Set(st, release(), Role, "spotifyd", false)
+	off, _ = Set(off, release(), Feature, "tidal", false)
+	on, _ := Set(off, release(), Role, "spotifyd", true)
+	on, err := Set(on, release(), Feature, "tidal", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if on.Roles["spotifyd"] != "1" || len(on.RolesExcluded) != 0 ||
+		!slices.Equal(on.Features, []string{"tidal"}) || len(on.FeaturesExcluded) != 0 {
+		t.Errorf("state = %+v", on)
 	}
 }
 
@@ -217,9 +239,12 @@ func TestDisableFeature(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(got.Features, []string{"qobuz"}) ||
+	if !slices.Equal(got.Features, []string{"qobuz", "tidal"}) ||
 		!slices.Equal(got.FeaturesExcluded, []string{"tidal"}) {
 		t.Errorf("features = %v / %v", got.Features, got.FeaturesExcluded)
+	}
+	if c := byName(List(got, release()))[[2]string{"feature", "tidal"}]; c.Status != Removing {
+		t.Errorf("tidal = %+v", c)
 	}
 }
 
