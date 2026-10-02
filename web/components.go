@@ -23,7 +23,7 @@ func (a *App) SetComponent(kind components.Kind, name string, enabled bool) (str
 		return label + " disabled — it will be removed by the next upgrade (apply it below).", nil
 	case !enabled:
 		return label + " disabled.", nil
-	case report != nil && report.HasPending(string(kind)+":"+name):
+	case report != nil && report.HasPending(components.Ref(kind, name)):
 		return label + " enabled — it will be installed by the next upgrade (apply it below).", nil
 	default:
 		return label + " enabled.", nil
