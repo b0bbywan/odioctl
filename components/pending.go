@@ -14,7 +14,7 @@ import (
 func Pending(st state.State, man *manifest.Manifest) []string {
 	var refs []string
 	for _, c := range pending(st, man) {
-		refs = append(refs, string(c.Kind)+":"+c.Name)
+		refs = append(refs, Ref(c.Kind, c.Name))
 	}
 	return refs
 }
@@ -91,10 +91,10 @@ func (r Removals) Empty() bool { return len(r.Roles) == 0 && len(r.Features) == 
 func (r Removals) Refs() []string {
 	refs := []string{}
 	for _, n := range r.Roles {
-		refs = append(refs, string(Role)+":"+n)
+		refs = append(refs, Ref(Role, n))
 	}
 	for _, n := range slices.Sorted(maps.Keys(r.Features)) {
-		refs = append(refs, string(Feature)+":"+n)
+		refs = append(refs, Ref(Feature, n))
 	}
 	return refs
 }

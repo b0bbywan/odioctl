@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 
 	"github.com/b0bbywan/odioctl/manifest"
 	"github.com/b0bbywan/odioctl/state"
@@ -20,6 +21,14 @@ const (
 	Role    Kind = "role"
 	Feature Kind = "feature"
 )
+
+// Ref is a component as upgrades.json lists it: "role:mpd", "feature:mympd".
+func Ref(kind Kind, name string) string { return string(kind) + ":" + name }
+
+func ParseRef(ref string) (Kind, string) {
+	kind, name, _ := strings.Cut(ref, ":")
+	return Kind(kind), name
+}
 
 type Status string
 

@@ -299,12 +299,12 @@ func upgradeViewOf(app *App, report *upgrade.Report) upgradeView {
 		view.Items = append(view.Items, fmt.Sprintf("%s %s → %s", r.Name, r.Installed, r.Available))
 	}
 	for _, ref := range report.PendingComponents {
-		kind, name, _ := strings.Cut(ref, ":")
-		view.Items = append(view.Items, "install "+components.LabelOf(&report.Manifest, components.Kind(kind), name))
+		kind, name := components.ParseRef(ref)
+		view.Items = append(view.Items, "install "+components.LabelOf(&report.Manifest, kind, name))
 	}
 	for _, ref := range report.PendingRemovals {
-		kind, name, _ := strings.Cut(ref, ":")
-		view.Items = append(view.Items, "remove "+components.LabelOf(&report.Manifest, components.Kind(kind), name))
+		kind, name := components.ParseRef(ref)
+		view.Items = append(view.Items, "remove "+components.LabelOf(&report.Manifest, kind, name))
 	}
 	return view
 }
