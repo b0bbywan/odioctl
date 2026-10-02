@@ -105,7 +105,7 @@ func disable(stdout, stderr io.Writer, statePath string, st state.State, r compo
 	}
 	// Read again: the web UI may have written it during the run.
 	if st, err = state.Read(statePath); err == nil {
-		st = components.Drop(st, t.man, r)
+		st = components.Drop(st, r)
 		err = state.Write(statePath, st)
 	}
 	if err != nil {

@@ -100,7 +100,7 @@ func TestDropKeepsTheExclusionsAndTakesARolesFeatures(t *testing.T) {
 	st := settled()
 	st.RolesExcluded = []string{"upmpdcli"}
 	st.FeaturesExcluded = []string{"mympd", "qobuz"}
-	got := Drop(st, release(), RemovalsOf(st, release()))
+	got := Drop(st, RemovalsOf(st, release()))
 	if _, ok := got.Roles["upmpdcli"]; ok {
 		t.Error("upmpdcli should leave Roles")
 	}

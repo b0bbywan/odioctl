@@ -66,16 +66,19 @@ func pending(st state.State, man *manifest.Manifest) []Component {
 type Removals struct {
 	Roles    []string
 	Features map[string]string // feature → its role
+	withRole []string          // the removed roles' features, whatever their status
 }
 
+// RemovalsOf relies on List's order: roles before features.
 func RemovalsOf(st state.State, man *manifest.Manifest) Removals {
 	r := Removals{Features: map[string]string{}}
 	for _, c := range List(st, man) {
 		switch {
-		case c.Status != Removing:
-		case c.Kind == Role:
+		case c.Kind == Role && c.Status == Removing:
 			r.Roles = append(r.Roles, c.Name)
-		case c.Parent != "" && !slices.Contains(r.Roles, c.Parent):
+		case c.Kind == Feature && slices.Contains(r.Roles, c.Parent):
+			r.withRole = append(r.withRole, c.Name)
+		case c.Kind == Feature && c.Status == Removing && c.Parent != "":
 			r.Features[c.Name] = c.Parent
 		}
 	}
@@ -99,15 +102,14 @@ func (r Removals) Refs() []string {
 // Drop returns st once r is removed: out of Roles and Features, the
 // exclusions kept. A removed role's features go with it, not excluded, so
 // they come back with the role.
-func Drop(st state.State, man *manifest.Manifest, r Removals) state.State {
+func Drop(st state.State, r Removals) state.State {
 	out := st.Clone()
 	for _, n := range r.Roles {
 		delete(out.Roles, n)
 	}
 	out.Features = slices.DeleteFunc(out.Features, func(f string) bool {
 		_, removed := r.Features[f]
-		info, _ := featureInfo(man, f)
-		return removed || (info.Parent != "" && slices.Contains(r.Roles, info.Parent))
+		return removed || slices.Contains(r.withRole, f)
 	})
 	return out
 }
