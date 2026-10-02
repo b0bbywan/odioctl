@@ -34,6 +34,22 @@ func TestInstallURLMirrorsManifestURL(t *testing.T) {
 	}
 }
 
+func TestArchiveURLNamesTheTarballAsReleaseYmlDoes(t *testing.T) {
+	for tag, want := range map[string]string{
+		"2026.5.0": "/releases/download/2026.5.0/odio-2026.5.0.tar.gz",
+		"pr-92":    "/releases/download/pr-92/odio-dev.tar.gz",
+	} {
+		if u, err := ArchiveURL(tag); err != nil || !strings.HasSuffix(u, want) {
+			t.Errorf("ArchiveURL(%q) = %q, %v", tag, u, err)
+		}
+	}
+	for _, tag := range []string{"latest", "../../evil/repo/releases/download/x"} {
+		if u, err := ArchiveURL(tag); err == nil {
+			t.Errorf("ArchiveURL(%q) = %q, want a refusal", tag, u)
+		}
+	}
+}
+
 func TestAcceptsTheTagShapesOdiosPublishes(t *testing.T) {
 	for _, tag := range []string{"latest", "2026.5.0", "2026.7.0rc2", "2026.7.0rc2-9-gcad916c", "pr-84"} {
 		if !IsReleaseTag(tag) {

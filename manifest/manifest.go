@@ -121,6 +121,19 @@ func ManifestURL(version string) (string, error) {
 	return releaseAssetURL(version, "manifest.json")
 }
 
+// ArchiveURL is the release's tarball, named as odios' release.yml does: a
+// pull request's pre-release ships odio-dev. "latest" names no archive.
+func ArchiveURL(tag string) (string, error) {
+	if tag == "latest" {
+		return "", fmt.Errorf("no archive for %q, a release tag is needed", tag)
+	}
+	asset := "odio-" + tag + ".tar.gz"
+	if strings.HasPrefix(tag, "pr-") {
+		asset = "odio-dev.tar.gz"
+	}
+	return releaseAssetURL(tag, asset)
+}
+
 var httpClient = &http.Client{Timeout: 10 * time.Second}
 
 // Fetch returns the manifest at url; each caller decides what a failure means
