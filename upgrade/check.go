@@ -86,22 +86,21 @@ func buildReport(st state.State, man manifest.Manifest, targetTag string) Report
 	if pending == nil {
 		pending = []string{}
 	}
-	removals := components.RemovalsOf(st, &man).Refs()
 	if targetTag == "" {
 		targetTag = man.Odios
 	}
-	return Report{
-		Current:   st.Odios,
-		Latest:    man.Odios,
-		TargetTag: targetTag,
-		UpgradeAvailable: len(upgrades) > 0 || versions.Compare(man.Odios, st.Odios) > 0 ||
-			len(pending) > 0 || len(removals) > 0,
+	r := Report{
+		Current:           st.Odios,
+		Latest:            man.Odios,
+		TargetTag:         targetTag,
 		Roles:             upgrades,
 		PendingComponents: pending,
-		PendingRemovals:   removals,
+		PendingRemovals:   components.RemovalsOf(st, &man).Refs(),
 		Manifest:          man,
 		CheckedAt:         time.Now().UTC().Format("2006-01-02T15:04:05Z"),
 	}
+	r.UpgradeAvailable = r.installs() || len(r.PendingRemovals) > 0
+	return r
 }
 
 func writeReport(report Report, output string) error {

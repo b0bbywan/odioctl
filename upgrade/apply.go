@@ -224,8 +224,8 @@ type target struct {
 // release is decided by `check`, only --force/--version run without one.
 // Nil means stop, with rc.
 func resolveTarget(stdout, stderr io.Writer, st state.State, report *Report, opts ApplyOptions) (*target, int) {
-	if !opts.Force && !opts.Reinstall && opts.Version == "" &&
-		(report == nil || !report.UpgradeAvailable) {
+	forced := opts.Force || opts.Reinstall || opts.Version != ""
+	if !forced && (report == nil || !report.UpgradeAvailable) {
 		fmt.Fprintln(stdout, "No upgrade reported in upgrades.json — use --force to override.")
 		return nil, 0
 	}
@@ -257,20 +257,17 @@ func resolveTarget(stdout, stderr io.Writer, st state.State, report *Report, opt
 		version:  version,
 		url:      url,
 		man:      targetManifest(report, version),
-		installs: opts.Force || opts.Reinstall || opts.Version != "" || report == nil || report.installs(),
+		installs: forced || report.installs(),
 	}, 0
 }
 
-// install runs install.sh for t; removals is what disables after it.
-func install(stdout io.Writer, st state.State, t *target, removals components.Removals, opts ApplyOptions) int {
+// install runs install.sh for t.
+func install(stdout io.Writer, st state.State, t *target, opts ApplyOptions) int {
 	env := buildApplyEnv(stdout, st, t.version, st.TargetUser, t.man, opts)
 	fmt.Fprintf(stdout, "Upgrading to %s via %s\n", t.version, t.url)
 	fmt.Fprintln(stdout, "  env passed to install.sh:")
 	for _, k := range slices.Sorted(maps.Keys(env)) {
 		fmt.Fprintf(stdout, "    %s=%s\n", k, env[k])
-	}
-	if !removals.Empty() {
-		fmt.Fprintf(stdout, "Then disabling %s from the release installed\n", strings.Join(removals.Refs(), ", "))
 	}
 	if opts.DryRun {
 		fmt.Fprintln(stdout, "(dry-run, not invoking)")
@@ -291,33 +288,19 @@ func RunApply(stdout, stderr io.Writer, opts ApplyOptions) int {
 	if t == nil {
 		return rc
 	}
-	// Gathered before any run: install.sh's state record drops them from
-	// Roles/Features, pending or not. The installed release disables them
-	// first when it can; otherwise the one install.sh brings does, after.
-	removals := components.RemovalsOf(st, t.man)
-	if !removals.Empty() && canDisable() {
-		if rc := disable(stdout, stderr, statePath, removals, t.man, opts); rc != 0 {
+	// Disabled first, by the target release: install.sh's state record would
+	// drop them from Roles/Features, pending or not.
+	if removals := components.RemovalsOf(st, t.man); !removals.Empty() {
+		if st, rc = disable(stdout, stderr, statePath, st, removals, t, opts); rc != 0 {
 			return rc
 		}
-		removals = components.Removals{}
-		if _, st, ok = loadState(io.Discard, stderr, opts); !ok {
-			return 2
-		}
 	}
-	if !t.installs && removals.Empty() {
+	if !t.installs {
 		fmt.Fprintln(stdout, "Nothing else to upgrade.")
 		if opts.DryRun {
 			fmt.Fprintln(stdout, "(dry-run, not invoking)")
 		}
 		return 0
 	}
-	if rc := install(stdout, st, t, removals, opts); rc != 0 || removals.Empty() || opts.DryRun {
-		return rc
-	}
-	if !canDisable() {
-		fmt.Fprintf(stdout, "The release installed has no disable.yml: %s left running.\n",
-			strings.Join(removals.Refs(), ", "))
-		return 0
-	}
-	return disable(stdout, stderr, statePath, removals, t.man, opts)
+	return install(stdout, st, t, opts)
 }
