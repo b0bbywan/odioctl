@@ -224,8 +224,8 @@ type target struct {
 // release is decided by `check`, only --force/--version run without one.
 // Nil means stop, with rc.
 func resolveTarget(stdout, stderr io.Writer, st state.State, report *Report, opts ApplyOptions) (*target, int) {
-	if !opts.Force && !opts.Reinstall && opts.Version == "" &&
-		(report == nil || !report.UpgradeAvailable) {
+	forced := opts.Force || opts.Reinstall || opts.Version != ""
+	if !forced && (report == nil || !report.UpgradeAvailable) {
 		fmt.Fprintln(stdout, "No upgrade reported in upgrades.json — use --force to override.")
 		return nil, 0
 	}
@@ -257,7 +257,7 @@ func resolveTarget(stdout, stderr io.Writer, st state.State, report *Report, opt
 		version:  version,
 		url:      url,
 		man:      targetManifest(report, version),
-		installs: opts.Force || opts.Reinstall || opts.Version != "" || report == nil || report.installs(),
+		installs: forced || report.installs(),
 	}, 0
 }
 
