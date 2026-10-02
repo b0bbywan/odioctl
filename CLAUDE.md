@@ -35,7 +35,7 @@ since rewritten in Go.
   script spawned a python3 at every login. odios keeps only the `~/.profile`
   hook. It never fails (exit 0): what is missing is left out.
 - **Test seams are explicit**: swappable package vars (`manifest.Fetch`,
-  `upgrade.runInstall`, `upgrade.runDisable`, `upgrade.ReleaseDir`,
+  `upgrade.runInstall`, `upgrade.runDisable`, `upgrade.fetchRelease`,
   `upgrade.Systemctl`, `dac.RebootFlag`) and injected
   funcs (`web.Runners`).
   Tests live in the package they test and swap the seam with `t.Cleanup`;
@@ -114,12 +114,13 @@ since rewritten in Go.
   `Removing`, a feature likewise; re-enabling just clears it. `apply`
   gathers the removals before any run and hands them to odios'
   `disable.yml` (stop the units, the role's hook, replay odio_api), from
-  the release install.sh keeps in `upgrade.ReleaseDir`
-  (`/var/lib/odio/release`), offline: `target_user` and the names only,
+  the target release's archive (`manifest.ArchiveURL`, named as odios'
+  `release.yml` does), downloaded and extracted into a temp dir
+  (`upgrade.fetchRelease`, stdlib, `os.Root`: only files and directories,
+  nothing out of it — it runs as root): `target_user` and the names only,
   odios derives the rest from state.json, so a removal must stay in
-  `roles`/`features` until it ran. The kept release disables first, and a
-  removal alone never runs install.sh; one kept before `disable.yml` gets
-  install.sh first, then the new release's. On success odioctl, not
+  `roles`/`features` until it ran. One order: the disable first, then
+  install.sh, never for a removal alone. On success odioctl, not
   odios, drops the removed names from state.json (a role's features with
   it, not excluded) and refreshes upgrades.json; on failure they stay
   pending. The names are checked (`componentName`): they end up in a path
