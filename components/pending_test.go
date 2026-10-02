@@ -23,7 +23,7 @@ func settled() state.State {
 
 func TestPendingRunsNothingWhenSettled(t *testing.T) {
 	st := settled()
-	if p := Pending(st, release()); p != nil {
+	if p := Pending(st, release()); len(p) != 0 {
 		t.Errorf("Pending = %v", p)
 	}
 	if r := PendingRuns(st, release()); r != nil {
@@ -59,8 +59,8 @@ func TestPendingSkipsTheFeatureOfARemovedParent(t *testing.T) {
 	st := settled()
 	st.RolesExcluded = []string{"upmpdcli"}
 	st.Features = without(st.Features, "tidal")
-	if p := Pending(st, release()); p != nil {
-		t.Errorf("Pending = %v, want nil", p)
+	if p := Pending(st, release()); len(p) != 0 {
+		t.Errorf("Pending = %v, want none", p)
 	}
 }
 

@@ -123,7 +123,7 @@ func TestWithoutAReleaseStateIsShownAndNothingToggles(t *testing.T) {
 	}
 	_, err := Set(st, nil, Role, "spotifyd", false)
 	wantComponentError(t, err)
-	if p := Pending(st, nil); p != nil {
+	if p := Pending(st, nil); len(p) != 0 {
 		t.Errorf("Pending = %v", p)
 	}
 }

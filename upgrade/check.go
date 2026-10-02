@@ -81,11 +81,6 @@ func computeRoleUpgrades(st state.State, man manifest.Manifest) []RoleUpgrade {
 }
 
 func buildReport(st state.State, man manifest.Manifest, targetTag string) Report {
-	upgrades := computeRoleUpgrades(st, man)
-	pending := components.Pending(st, &man)
-	if pending == nil {
-		pending = []string{}
-	}
 	if targetTag == "" {
 		targetTag = man.Odios
 	}
@@ -93,8 +88,8 @@ func buildReport(st state.State, man manifest.Manifest, targetTag string) Report
 		Current:           st.Odios,
 		Latest:            man.Odios,
 		TargetTag:         targetTag,
-		Roles:             upgrades,
-		PendingComponents: pending,
+		Roles:             computeRoleUpgrades(st, man),
+		PendingComponents: components.Pending(st, &man),
 		PendingRemovals:   components.RemovalsOf(st, &man).Refs(),
 		Manifest:          man,
 		CheckedAt:         time.Now().UTC().Format("2006-01-02T15:04:05Z"),
