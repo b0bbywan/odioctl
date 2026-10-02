@@ -105,34 +105,29 @@ func (t *target) archiveURL() (string, error) {
 }
 
 // disable runs r through the target release's disable.yml, then drops it from
-// state.json and refreshes upgrades.json. On failure r stays pending.
-func disable(stdout, stderr io.Writer, statePath string, r components.Removals,
-	t *target, opts ApplyOptions) int {
-	st, err := state.Read(statePath)
-	if err != nil {
-		fmt.Fprintf(stderr, "Error reading %s: %v\n", statePath, err)
-		return 2
-	}
+// state.json, returned, and refreshes upgrades.json. On failure r stays pending.
+func disable(stdout, stderr io.Writer, statePath string, st state.State, r components.Removals,
+	t *target, opts ApplyOptions) (state.State, int) {
 	refs := strings.Join(r.Refs(), ", ")
 	vars, err := disableVars(st.TargetUser, r)
 	if err != nil {
 		fmt.Fprintf(stdout, "Refusing to disable: %v.\n", err)
-		return 2
+		return st, 2
 	}
 	url, err := t.archiveURL()
 	if err != nil {
 		fmt.Fprintf(stdout, "Cannot disable %s: %v.\n", refs, err)
-		return 2
+		return st, 2
 	}
 	fmt.Fprintf(stdout, "Disabling %s via %s\n", refs, url)
 	fmt.Fprintf(stdout, "  vars passed to disable.yml: %s\n", vars)
 	if opts.DryRun {
-		return 0
+		return st, 0
 	}
 	dir, err := fetchRelease(url)
 	if err != nil {
 		fmt.Fprintf(stdout, "Downloading %s failed (%v): %s stay pending.\n", url, err, refs)
-		return 1
+		return st, 1
 	}
 	defer func() { _ = os.RemoveAll(dir) }()
 	env := map[string]string{}
@@ -145,16 +140,17 @@ func disable(stdout, stderr io.Writer, statePath string, r components.Removals,
 	}
 	if rc := runDisable(dir, vars, env); rc != 0 {
 		fmt.Fprintf(stdout, "disable.yml failed (exit %d): %s stay pending.\n", rc, refs)
-		return rc
+		return st, rc
 	}
 	// Read again: the web UI may have written it during the run.
 	if st, err = state.Read(statePath); err == nil {
-		err = state.Write(statePath, components.Drop(st, t.man, r))
+		st = components.Drop(st, t.man, r)
+		err = state.Write(statePath, st)
 	}
 	if err != nil {
 		fmt.Fprintf(stderr, "Error recording the removals in %s: %v\n", statePath, err)
-		return 1
+		return st, 1
 	}
 	Refresh(CheckOptions{State: statePath})
-	return 0
+	return st, 0
 }

@@ -291,11 +291,8 @@ func RunApply(stdout, stderr io.Writer, opts ApplyOptions) int {
 	// Disabled first, by the target release: install.sh's state record would
 	// drop them from Roles/Features, pending or not.
 	if removals := components.RemovalsOf(st, t.man); !removals.Empty() {
-		if rc := disable(stdout, stderr, statePath, removals, t, opts); rc != 0 {
+		if st, rc = disable(stdout, stderr, statePath, st, removals, t, opts); rc != 0 {
 			return rc
-		}
-		if _, st, ok = loadState(io.Discard, stderr, opts); !ok {
-			return 2
 		}
 	}
 	if !t.installs {
