@@ -12,7 +12,7 @@ import (
 // "feature:mympd", …] in List's order, a switched audio server first.
 // What it would remove is Removals'.
 func Pending(st state.State, man *manifest.Manifest) []string {
-	var refs []string
+	refs := []string{}
 	for _, c := range pending(st, man) {
 		refs = append(refs, Ref(c.Kind, c.Name))
 	}
