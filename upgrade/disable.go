@@ -65,16 +65,6 @@ var runDisable = func(dir string, vars []byte, env map[string]string) int {
 	return code
 }
 
-// archiveURL is t's release tarball. "latest" names none: its manifest's
-// version is the tag, a published release being tagged by its version.
-func (t *target) archiveURL() (string, error) {
-	tag := t.version
-	if tag == "latest" && t.man != nil {
-		tag = t.man.Odios
-	}
-	return manifest.ArchiveURL(tag)
-}
-
 // disable runs r through the target release's disable.yml, then drops it from
 // state.json, returned, and refreshes upgrades.json. On failure r stays pending.
 func disable(stdout, stderr io.Writer, statePath string, st state.State, r components.Removals,
@@ -85,7 +75,7 @@ func disable(stdout, stderr io.Writer, statePath string, st state.State, r compo
 		fmt.Fprintf(stdout, "Refusing to disable: %v.\n", err)
 		return st, 2
 	}
-	url, err := t.archiveURL()
+	url, err := manifest.ArchiveURL(t.version)
 	if err != nil {
 		fmt.Fprintf(stdout, "Cannot disable %s: %v.\n", refs, err)
 		return st, 2
