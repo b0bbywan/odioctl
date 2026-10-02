@@ -248,6 +248,12 @@ func resolveTarget(stdout, stderr io.Writer, st state.State, report *Report, opt
 		fmt.Fprintf(stdout, "Refusing to downgrade: target %s < installed %s.\n", version, st.Odios)
 		return nil, 2
 	}
+	// "latest" becomes the release its manifest names, so install.sh comes
+	// from that very release; a release is tagged by its version.
+	man := targetManifest(report, version)
+	if version == "latest" && man != nil {
+		version = man.Odios
+	}
 	url, err := manifest.InstallURL(version)
 	if err != nil {
 		fmt.Fprintf(stderr, "Error: %v\n", err)
@@ -256,7 +262,7 @@ func resolveTarget(stdout, stderr io.Writer, st state.State, report *Report, opt
 	return &target{
 		version:  version,
 		url:      url,
-		man:      targetManifest(report, version),
+		man:      man,
 		installs: forced || report.installs(),
 	}, 0
 }
