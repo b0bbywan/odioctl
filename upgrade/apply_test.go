@@ -470,6 +470,17 @@ func TestForceWithoutReportTargetsLatest(t *testing.T) {
 	}
 }
 
+func TestForceWithoutReportResolvesLatestToItsTag(t *testing.T) {
+	d := t.TempDir()
+	writeState(t, d, makeState())
+	swapFetch(t, fetchOf(man("2026.6.0", map[string]string{"mpd": "2026.6.0"})))
+	noInstall(t)
+	rc, text := runApply(t, d, ApplyOptions{Force: true, DryRun: true})
+	if rc != 0 || !strings.Contains(text, "Upgrading to 2026.6.0 via https://github.com/b0bbywan/odios/releases/download/2026.6.0/install.sh") {
+		t.Errorf("rc = %d, out = %q", rc, text)
+	}
+}
+
 func TestTargetsTheTagRecordedByCheck(t *testing.T) {
 	d := t.TempDir()
 	st := makeState()
