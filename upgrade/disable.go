@@ -49,15 +49,9 @@ func orEmpty[T ~[]string | ~map[string]string](v, empty T) T {
 // runDisable runs the disable.yml of the release extracted in dir through its
 // vendored ansible, the way install.sh runs playbook.yml; a var for tests.
 var runDisable = func(dir string, vars []byte, env map[string]string) int {
-	path, err := writeVars(vars)
-	if err != nil {
-		slog.Error("disable.yml vars", "err", err)
-		return 1
-	}
-	defer removeVars(path)
 	cmd := exec.Command("python3", filepath.Join(dir, "vendor", "bin", "ansible-playbook"),
 		"-i", filepath.Join(dir, "ansible", "inventory", "localhost.yml"),
-		filepath.Join(dir, "ansible", "disable.yml"), "-e", "@"+path)
+		filepath.Join(dir, "ansible", "disable.yml"), "-e", string(vars))
 	cmd.Env = append(os.Environ(), "PYTHONPATH="+filepath.Join(dir, "vendor"))
 	for k, v := range env {
 		cmd.Env = append(cmd.Env, k+"="+v)
@@ -69,29 +63,6 @@ var runDisable = func(dir string, vars []byte, env map[string]string) int {
 		return 1
 	}
 	return code
-}
-
-// writeVars puts vars in a temp file of its own (0600), for ansible's -e @file.
-func writeVars(vars []byte) (string, error) {
-	f, err := os.CreateTemp("", "odioctl-disable-*.json")
-	if err != nil {
-		return "", err
-	}
-	_, err = f.Write(vars)
-	if cerr := f.Close(); err == nil {
-		err = cerr
-	}
-	if err != nil {
-		removeVars(f.Name())
-		return "", err
-	}
-	return f.Name(), nil
-}
-
-func removeVars(path string) {
-	if err := os.Remove(path); err != nil {
-		slog.Warn("disable.yml vars left behind", "path", path, "err", err)
-	}
 }
 
 // archiveURL is t's release tarball. "latest" names none: its manifest's
