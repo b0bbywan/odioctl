@@ -155,6 +155,55 @@ func TestTheTargetReleaseDisablesBeforeTheUpgrade(t *testing.T) {
 	}
 }
 
+// As on the test odio: one role removed by an earlier apply comes back, and
+// another goes, both before the same apply.
+func TestAReEnableAndADisableInOneApply(t *testing.T) {
+	d := t.TempDir()
+	st := makeState()
+	st.Roles = map[string]string{"mpd": "2026.5.0", "upmpdcli": "2026.5.0"}
+	st.RolesExcluded = []string{"spotifyd"}
+	st.Features = []string{"mympd", "tidal"}
+	rel := man("2026.5.0", map[string]string{"mpd": "2026.5.0", "spotifyd": "2026.5.0", "upmpdcli": "2026.5.0"})
+	var err error
+	for _, toggle := range []struct {
+		name string
+		on   bool
+	}{{"spotifyd", true}, {"upmpdcli", false}} {
+		if st, err = components.Set(st, &rel, components.Role, toggle.name, toggle.on); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeState(t, d, st)
+	checkFor(t, d, "2026.5.0")
+	swapRelease(t, nil)
+	order, runs := recordRuns(t, 0, 0)
+	rc, text := runApply(t, d, ApplyOptions{})
+	if rc != 0 || !slices.Equal(*order, []string{"disable", "install"}) {
+		t.Fatalf("rc = %d, ran %v\n%s", rc, *order, text)
+	}
+	want := map[string]any{
+		"target_user":            "odio",
+		"odios_disable_roles":    []any{"upmpdcli"},
+		"odios_disable_features": map[string]any{},
+	}
+	if got := (*runs)[0].Vars; !reflect.DeepEqual(got, want) {
+		t.Errorf("vars = %v, want %v", got, want)
+	}
+	// spotifyd in neither list: install.sh's own default installs it.
+	if !strings.Contains(text, "INSTALL_UPMPDCLI=N") || strings.Contains(text, "INSTALL_SPOTIFYD=") {
+		t.Errorf("out:\n%s", text)
+	}
+	st = readState(t, d)
+	if _, ok := st.Roles["upmpdcli"]; ok || !slices.Equal(st.Features, []string{"mympd"}) ||
+		!slices.Equal(st.RolesExcluded, []string{"upmpdcli"}) {
+		t.Errorf("state = %+v", st)
+	}
+	if r := ReadReport(filepath.Join(d, "upgrades.json")); r == nil ||
+		!slices.Equal(r.PendingComponents, []string{"role:spotifyd"}) || len(r.PendingRemovals) != 0 {
+		t.Errorf("report = %+v", r)
+	}
+}
+
 // A failed disable leaves the removal pending, and nothing else runs.
 func TestAFailedDisableStopsTheApply(t *testing.T) {
 	d := t.TempDir()
