@@ -60,7 +60,7 @@ func (e Entry) OverlayLine() string {
 }
 
 var Catalog = []Entry{
-	{ID: Onboard, Label: "Onboard audio (3.5mm jack / HDMI)"},
+	{ID: Onboard, Label: "Onboard audio (3.5mm jack / HDMI / USB)"},
 	// Generic I2S
 	{ID: "i2s-dac", Label: "Generic passive I2S DAC (Pi as clock master)"},
 	{ID: "i2s-master-dac", Label: "Generic I2S DAC acting as clock master"},
