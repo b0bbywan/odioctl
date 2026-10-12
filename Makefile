@@ -44,8 +44,8 @@ deb-%: dist/odioctl-linux-%
 	nfpm package --config dist/.nfpm-$*.yaml --packager deb --target dist/
 	rm -f dist/.nfpm-$*.yaml
 
-# data/sudoers/odioctl lists one line per DAC id (no wildcards) — regenerate
-# after touching dac.Catalog.
+# data/sudoers/odioctl lists one line per DAC id and per input pin (no
+# wildcards) — regenerate after touching dac.Catalog or input.Pins.
 sudoers:
 	go generate ./dac
 
