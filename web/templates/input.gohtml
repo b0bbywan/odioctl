@@ -1,0 +1,10 @@
+<section id="input" sse-swap="input" hx-swap="outerHTML"{{if not .Supported}} hidden{{end}}>
+<h2>Infrared receiver</h2>
+{{if .Supported}}
+<div class="row">
+  <form hx-post="input/ir" hx-target="#notice" hx-swap="innerHTML" class="row"><input type="hidden" name="token" value="{{.Token}}"><select name="pin">{{range .IRPins}}<option value="{{.Pin}}"{{if .Disabled}} disabled{{end}}{{if .Selected}} selected{{end}}>{{.Text}}</option>{{end}}</select><button class="primary" type="submit">Apply</button></form>
+  {{if .Managed}}<form hx-post="input/ir/unset" hx-target="#notice" hx-swap="innerHTML"><input type="hidden" name="token" value="{{.Token}}"><button type="submit">Reset</button></form>{{end}}
+</div>
+<p class="hint">{{.Current}}</p>
+{{if .Stray}}<div class="banner warn">{{.Stray}}</div>{{end}}
+{{end}}</section>
