@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/b0bbywan/odioctl/configtxt"
 )
 
 const fixture = `# For more options and information see
@@ -181,39 +183,21 @@ func TestUnapplyWithoutBlockIsNoop(t *testing.T) {
 	}
 }
 
-func TestWriteConfigKeepsAOneTimeBackup(t *testing.T) {
-	cfg := filepath.Join(t.TempDir(), "config.txt")
-	if err := os.WriteFile(cfg, []byte(fixture), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	applied := Apply(fixture, entry(t, "hifiberry-dacplus-std"))
-	if err := WriteConfig(cfg, applied); err != nil {
-		t.Fatal(err)
-	}
-	if err := WriteConfig(cfg, Apply(applied, entry(t, "hifiberry-dac"))); err != nil {
-		t.Fatal(err)
-	}
-	bak, err := os.ReadFile(cfg + ".odioctl.bak")
-	if err != nil || string(bak) != fixture {
-		t.Errorf("backup = %q, %v; want the pristine file", bak, err)
-	}
-}
-
 func TestStatusAndRebootFlag(t *testing.T) {
 	d := t.TempDir()
 	cfg := filepath.Join(d, "config.txt")
 	if err := os.WriteFile(cfg, []byte(fixture), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	old := RebootFlag
-	RebootFlag = filepath.Join(d, "run", "reboot-required")
-	t.Cleanup(func() { RebootFlag = old })
+	old := configtxt.RebootFlag
+	configtxt.RebootFlag = filepath.Join(d, "run", "reboot-required")
+	t.Cleanup(func() { configtxt.RebootFlag = old })
 
 	s := GetStatus(cfg)
 	if !s.Supported || s.Current != Onboard || s.Managed || s.RebootRequired {
 		t.Errorf("status = %+v", s)
 	}
-	MarkRebootRequired()
+	configtxt.MarkRebootRequired()
 	if !GetStatus(cfg).RebootRequired {
 		t.Error("reboot flag not seen")
 	}

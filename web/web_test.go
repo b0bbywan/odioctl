@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/b0bbywan/odioctl/components"
+	"github.com/b0bbywan/odioctl/configtxt"
 	"github.com/b0bbywan/odioctl/dac"
 	"github.com/b0bbywan/odioctl/manifest"
 	"github.com/b0bbywan/odioctl/state"
@@ -71,9 +72,9 @@ func newFixture(t *testing.T) *fixture {
 	if err := os.WriteFile(f.configPath, []byte(configFixture), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	oldFlag := dac.RebootFlag
-	dac.RebootFlag = filepath.Join(f.dir, "reboot-required")
-	t.Cleanup(func() { dac.RebootFlag = oldFlag })
+	oldFlag := configtxt.RebootFlag
+	configtxt.RebootFlag = filepath.Join(f.dir, "reboot-required")
+	t.Cleanup(func() { configtxt.RebootFlag = oldFlag })
 
 	// No network: `upgrade.Refresh` sees this manifest, whose catalog says
 	// what the page offers.
@@ -946,7 +947,7 @@ func TestDacSetRunsPrivilegedAndMarksReboot(t *testing.T) {
 	if len(f.privileged) != 1 {
 		t.Fatalf("privileged = %v", f.privileged)
 	}
-	text, _ := dac.ReadConfig(f.configPath)
+	text, _ := configtxt.Read(f.configPath)
 	if dac.Parse(text).Current != "hifiberry-dacplus-std" {
 		t.Error("config.txt not updated")
 	}
@@ -1022,7 +1023,7 @@ func TestDacSameIdInAnOlderLayoutStillApplies(t *testing.T) {
 	}
 	_, body := f.post("/dac", url.Values{"id": {"onboard"}}, true)
 	wants(t, body, "DAC set to onboard")
-	text, _ := dac.ReadConfig(f.configPath)
+	text, _ := configtxt.Read(f.configPath)
 	if !strings.HasPrefix(text, dac.Begin) || strings.Contains(text, "\ndtoverlay=\n") {
 		t.Errorf("block not rewritten:\n%s", text)
 	}
@@ -1034,7 +1035,7 @@ func TestDacSameIdOverUnmanagedConfigStillApplies(t *testing.T) {
 	f := newFixture(t)
 	_, body := f.post("/dac", url.Values{"id": {"onboard"}}, true)
 	wants(t, body, "DAC set to onboard", "reboot required")
-	text, _ := dac.ReadConfig(f.configPath)
+	text, _ := configtxt.Read(f.configPath)
 	if !dac.Parse(text).Managed {
 		t.Error("block not taken over")
 	}
@@ -1044,7 +1045,7 @@ func TestDacUnsetRestores(t *testing.T) {
 	f := newFixture(t)
 	f.post("/dac", url.Values{"id": {"hifiberry-dacplus-std"}}, true)
 	f.post("/dac/unset", url.Values{}, true)
-	text, _ := dac.ReadConfig(f.configPath)
+	text, _ := configtxt.Read(f.configPath)
 	if text != configFixture {
 		t.Errorf("config.txt = %q", text)
 	}

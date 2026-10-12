@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/b0bbywan/odioctl/configtxt"
 	"github.com/b0bbywan/odioctl/dac"
 	"github.com/b0bbywan/odioctl/state"
 )
@@ -200,9 +201,9 @@ func writeConfig(t *testing.T) string {
 	if err := os.WriteFile(cfg, []byte(configFixture), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	old := dac.RebootFlag
-	dac.RebootFlag = filepath.Join(d, "run", "reboot-required")
-	t.Cleanup(func() { dac.RebootFlag = old })
+	old := configtxt.RebootFlag
+	configtxt.RebootFlag = filepath.Join(d, "run", "reboot-required")
+	t.Cleanup(func() { configtxt.RebootFlag = old })
 	return cfg
 }
 
@@ -234,7 +235,7 @@ func TestDacSetWritesBackupAndFlag(t *testing.T) {
 	if rc != 0 || !strings.Contains(out, "reboot required") {
 		t.Fatalf("rc = %d, out = %q", rc, out)
 	}
-	text, _ := dac.ReadConfig(cfg)
+	text, _ := configtxt.Read(cfg)
 	if dac.Parse(text).Current != "hifiberry-dacplus-std" {
 		t.Error("overlay not applied")
 	}
@@ -253,7 +254,7 @@ func TestDacDryRunWritesNothing(t *testing.T) {
 	if rc != 0 || !strings.Contains(out, dac.Begin) {
 		t.Fatalf("rc = %d", rc)
 	}
-	text, _ := dac.ReadConfig(cfg)
+	text, _ := configtxt.Read(cfg)
 	if text != configFixture {
 		t.Error("config was written")
 	}
@@ -296,7 +297,7 @@ func TestDacSetThenUnsetRestores(t *testing.T) {
 	if rc != 0 {
 		t.Fatalf("rc = %d", rc)
 	}
-	text, _ := dac.ReadConfig(cfg)
+	text, _ := configtxt.Read(cfg)
 	if text != configFixture {
 		t.Errorf("config = %q", text)
 	}
