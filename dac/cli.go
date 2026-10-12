@@ -39,6 +39,8 @@ func RunStatus(stdout io.Writer, configPath string, asJSON bool) int {
 	label := "(unknown)"
 	if e, ok := ByID(current); ok {
 		label = e.Label
+	} else if current == Onboard {
+		label = "the Pi's own audio, no DAC"
 	}
 	if current == "" {
 		current, label = "(none)", ""

@@ -244,12 +244,15 @@ func dacViewOf(app *App, d dac.Status) dacView {
 	if !d.Supported {
 		return dacView{}
 	}
+	// Onboard is no option: without the placeholder selected, the browser
+	// would show the first DAC as if it were the current one.
+	_, known := dac.ByID(d.Current)
 	view := dacView{
 		Supported: true,
 		Token:     app.Token(),
 		Managed:   d.Managed,
 		Options: []dacOptionView{
-			{ID: "", Text: "— not configured —", Disabled: true, Selected: d.Current == ""},
+			{ID: "", Text: "— not configured —", Disabled: true, Selected: !known},
 		},
 	}
 	for _, e := range dac.Catalog {
