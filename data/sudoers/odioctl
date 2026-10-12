@@ -2,7 +2,7 @@
 # Lets members of the `odioctl` group run the privileged bits of odioctl
 # unattended:
 #   * odio-upgrade.service (systemd --user) applies upgrades as root;
-#   * odioctl-web / `odioctl dac` rewrite /boot/firmware/config.txt.
+#   * odioctl-web / `odioctl dac` / `odioctl input` rewrite /boot/firmware/config.txt.
 # Deliberately not the `odio` group: that one carries read/write on
 # /var/lib/odio/state.json and odios also puts the installing user in it, so
 # keying root on it would turn a state-access group into a root group. odios
@@ -90,3 +90,24 @@ Defaults:%:odioctl env_keep += "XDG_RUNTIME_DIR"
 %:odioctl ALL=(root) NOPASSWD: /usr/bin/odioctl dac set audiosense-pi
 %:odioctl ALL=(root) NOPASSWD: /usr/bin/odioctl dac set pibell
 %:odioctl ALL=(root) NOPASSWD: /usr/bin/odioctl dac set ezsound-6x8iso
+%:odioctl ALL=(root) NOPASSWD: /usr/bin/odioctl input ir unset
+%:odioctl ALL=(root) NOPASSWD: /usr/bin/odioctl input ir set 4
+%:odioctl ALL=(root) NOPASSWD: /usr/bin/odioctl input ir set 5
+%:odioctl ALL=(root) NOPASSWD: /usr/bin/odioctl input ir set 6
+%:odioctl ALL=(root) NOPASSWD: /usr/bin/odioctl input ir set 7
+%:odioctl ALL=(root) NOPASSWD: /usr/bin/odioctl input ir set 8
+%:odioctl ALL=(root) NOPASSWD: /usr/bin/odioctl input ir set 9
+%:odioctl ALL=(root) NOPASSWD: /usr/bin/odioctl input ir set 10
+%:odioctl ALL=(root) NOPASSWD: /usr/bin/odioctl input ir set 11
+%:odioctl ALL=(root) NOPASSWD: /usr/bin/odioctl input ir set 12
+%:odioctl ALL=(root) NOPASSWD: /usr/bin/odioctl input ir set 13
+%:odioctl ALL=(root) NOPASSWD: /usr/bin/odioctl input ir set 14
+%:odioctl ALL=(root) NOPASSWD: /usr/bin/odioctl input ir set 15
+%:odioctl ALL=(root) NOPASSWD: /usr/bin/odioctl input ir set 16
+%:odioctl ALL=(root) NOPASSWD: /usr/bin/odioctl input ir set 17
+%:odioctl ALL=(root) NOPASSWD: /usr/bin/odioctl input ir set 22
+%:odioctl ALL=(root) NOPASSWD: /usr/bin/odioctl input ir set 23
+%:odioctl ALL=(root) NOPASSWD: /usr/bin/odioctl input ir set 24
+%:odioctl ALL=(root) NOPASSWD: /usr/bin/odioctl input ir set 25
+%:odioctl ALL=(root) NOPASSWD: /usr/bin/odioctl input ir set 26
+%:odioctl ALL=(root) NOPASSWD: /usr/bin/odioctl input ir set 27
