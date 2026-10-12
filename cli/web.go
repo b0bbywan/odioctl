@@ -20,7 +20,7 @@ func runWeb(stdout, stderr io.Writer, args []string) int {
 		"(default: $ODIOCTL_UI_URL, else http://<host>:8018/ui)")
 	fs.StringVar(&cfg.StatePath, "state", state.SystemStatePath, "path to state.json")
 	fs.StringVar(&cfg.ConfigTxt, "config", "", configUsage+". "+
-		"Dev/test only: the sudoers rule does not admit --config, so DAC changes "+
+		"Dev/test only: the sudoers rule does not admit --config, so DAC and input changes "+
 		"through sudo will be refused")
 	fs.StringVar(&cfg.UpgradesPath, "upgrades", "", "path to upgrades.json "+
 		"(default: "+state.SystemUpgradesPath+", or next to a custom --state)")
