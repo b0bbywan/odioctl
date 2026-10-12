@@ -25,7 +25,7 @@ type Config struct {
 	SystemdOnly  bool   // serve only the sockets systemd passes, never bind: the units' mode
 	UIURL        string // where the logo leads; "" → odio-api on the host the browser used
 	StatePath    string
-	ConfigTxt    string // "" → dac.ConfigTxt
+	ConfigTxt    string // "" → configtxt.Path
 	OdioctlBin   string
 	UpgradesPath string // "" → sibling of a custom StatePath, else /var/cache
 	Home         string // the target user's home, what an action's {home} becomes
