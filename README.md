@@ -26,7 +26,7 @@
 </p>
 
 `odioctl` is the CLI and web UI for configuring an [odio](https://odio.love)
-node — upgrades, components and DAC selection today, and meant to grow with
+node — upgrades, components, DAC selection and the infrared receiver today, and meant to grow with
 the rest of the node's settings. It started as a rewrite of the `odio-upgrade`
 script that used to ship inside [odios](https://github.com/b0bbywan/odios).
 A single static Go binary (stdlib plus fsnotify), packaged as per-arch `.deb`s on
@@ -51,7 +51,7 @@ The package ships (not auto-enabled — odios' installer enables them per user):
 
 Enable one socket or both: the service serves those that run and never binds
 anything itself, so a door odios leaves closed stays closed.
-| `/etc/sudoers.d/odioctl` | NOPASSWD for the `odioctl` group: `upgrade apply --progress`, `dac set <id>` (one line per id), `dac unset` |
+| `/etc/sudoers.d/odioctl` | NOPASSWD for the `odioctl` group: `upgrade apply --progress`, `dac set <id>` (one line per id), `dac unset`, `input ir set <gpio>` (one line per pin), `input ir unset` |
 
 The postinst creates the `odioctl` system group and leaves it empty; odios adds
 its target user. It is deliberately not the `odio` group, which carries
@@ -72,6 +72,7 @@ odioctl upgrade verify [--state PATH] [--expected-version TAG]
 odioctl pwa-url
 odioctl components [--state PATH] list [--json] | enable NAME | disable NAME
 odioctl dac list [--json] | status [--json] | set ID [--dry-run] | unset
+odioctl input status [--json] | ir set GPIO [--dry-run] | ir unset
 odioctl web [--bind 0.0.0.0] [--port 8021] [--socket PATH] [--systemd-only] [--ui-url URL] [--state PATH] [--config PATH]
 odioctl state [--state PATH] record < run.json | show
 odioctl motd [--state PATH]
@@ -199,22 +200,50 @@ flags it until then). `set`/`unset` need root — the web UI calls them through
 `sudo -n`, and the sudoers file lists every catalog id explicitly, so no other
 argument (in particular `--config`) can go through sudo.
 
+### `input`
+
+The remote controls odio-api's input backend reads: the infrared receiver so
+far (`input ir set GPIO`, `input ir unset`). Owns a block of its own, last in
+`/boot/firmware/config.txt`:
+
+```
+# BEGIN odioctl input -- managed block, edit with `odioctl input`
+[all]
+dtoverlay=gpio-ir,gpio_pin=25
+# END odioctl input
+```
+
+That is the kernel's `gpio-ir` receiver, an `rc` device odio-api picks up by
+itself. The pin is always written and comes from a closed list — GPIO 4 to 17
+and 22 to 27: the overlay's own default, 18, is I2S's bit clock, which the
+DACs hold as they do 19 to 21, and 2 and 3 are I2C. Which of those the
+receiver sits on is the board's business. Nothing else is set: pull, polarity
+and keymap stay the overlay's defaults, the keymap being `ir-keytable`'s to
+load.
+
+The two blocks do not know each other: `dac set`/`unset` leave this one where
+it is, `input ir unset` leaves the DAC's. A `dtoverlay=gpio-ir` line of the
+file's own is commented out with an `#odioctl-input-disabled: ` prefix and
+restored by `input ir unset`. Backup, reboot flag and sudo are the DAC's: one
+sudoers line per pin.
+
 ### `web`
 
 A stdlib `net/http` server on port 8021 serving one server-rendered page —
 HTML forms over htmx (the same htmx and SSE extension as odio-api's
 dashboard), no JSON API: a components table where one icon per row is both the
 state and its toggle — the action shows on hover, a lock stands for a required
-role — and a DAC picker (select + Apply, Reset to drop the odioctl block, then a
-Reboot button on the banner the change leaves). Actions are
-`POST /components`, `POST /dac`, `POST /dac/unset`, `POST /reboot`; the page answers with
+role — a DAC picker and an infrared receiver's GPIO picker (select + Apply,
+Reset to drop the odioctl block, then a Reboot button on the banner the change
+leaves). Actions are `POST /components`, `POST /dac`, `POST /dac/unset`,
+`POST /input/ir`, `POST /input/ir/unset`, `POST /reboot`; the page answers with
 a message or error banner and every section follows odio live over
 `GET /events`. Every form carries a per-process token, so a cross-site page
 cannot drive odio. There
 is no authentication (same LAN trust model as odio-api); use `--bind 127.0.0.1`
 to keep it local. Runs as the odios target user; state.json is edited
 directly (needs `/var/lib/odio` group-writable by `odio`, see below),
-config.txt through `sudo -n odioctl dac …` (needs that user in the `odioctl`
+config.txt through `sudo -n odioctl dac …` / `input …` (needs that user in the `odioctl`
 group).
 
 The logo links to odio-ui at `http://<host>:8018/ui`, `<host>` being the name
@@ -284,7 +313,7 @@ curl --unix-socket /tmp/odioctl-web.sock -H 'X-Forwarded-Prefix: /ui/admin' http
 make deb   # cross-compiles amd64/armhf/arm64 and packages via nfpm
 ```
 
-`data/sudoers/odioctl` is generated from the DAC catalog: `make sudoers`
+`data/sudoers/odioctl` is generated from the DAC catalog and the input pins: `make sudoers`
 (= `go generate ./dac`).
 
 ## License
