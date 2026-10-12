@@ -1,6 +1,6 @@
 # odioctl — notes for contributors (human or AI)
 
-System control for odio: `odioctl upgrade|components|dac|web|pwa-url`.
+System control for odio: `odioctl upgrade|components|dac|input|web|pwa-url`.
 Extracted from odios' `installer/ansible/roles/upgrade/files/odio_upgrade.py`,
 since rewritten in Go.
 
@@ -36,7 +36,7 @@ since rewritten in Go.
   hook. It never fails (exit 0): what is missing is left out.
 - **Test seams are explicit**: swappable package vars (`manifest.Fetch`,
   `upgrade.runInstall`, `upgrade.runDisable`, `upgrade.fetchRelease`,
-  `upgrade.Systemctl`, `dac.RebootFlag`) and injected
+  `upgrade.Systemctl`, `configtxt.RebootFlag`) and injected
   funcs (`web.Runners`).
   Tests live in the package they test and swap the seam with `t.Cleanup`;
   never reach around a seam to mock deeper.
@@ -54,9 +54,23 @@ since rewritten in Go.
   The block only ever says `audio=off`. The Pi's own audio is not a
   catalog entry: Reset gives the file back (`dac.Onboard` is only how an
   `audio=on` reads, 0.4.0's onboard block included).
-- **`data/sudoers/odioctl` is generated** from `dac.Catalog` by
-  `go generate ./dac` (one explicit line per DAC id, no wildcards).
-  Re-run it after touching the catalog; `dac/sudoers_test.go` fails on drift.
+- **config.txt has two owners, each with its marked block**
+  (`configtxt.Block`: split, the file's lines it replaces commented out under
+  its own prefix, restored on removal). `dac`'s is first, `input`'s last —
+  nothing of the file falls in its overlays' scope — and neither's unset takes
+  the other's block or restores the other's lines (`dac/dac_test.go`). The
+  file, its one-time backup, the reboot flag and the rewrite both CLIs run
+  (`configtxt.RunEdit`) are `configtxt`'s.
+- **`odioctl input` is the remote controls odio-api's input backend reads**,
+  the infrared receiver so far: `input ir set GPIO` writes
+  `dtoverlay=gpio-ir,gpio_pin=N`, the pin always and from `input.Pins` — the
+  overlay's own default, 18, is I2S's bit clock, which the DACs hold, hence
+  no 18–21 nor I2C's 2–3 in the list. `gpio-key` buttons would be more lines
+  of the same block; not done until someone asks.
+- **`data/sudoers/odioctl` is generated** from `dac.Catalog` and `input.Pins`
+  by `go generate ./dac` (one explicit line per DAC id and per pin, no
+  wildcards). Re-run it after touching either; `dac/sudoers_test.go` fails on
+  drift.
 - `odioctl web` is **socket-activated**: the sockets are the units that get
   enabled, and systemd passes those running from fd 3 on (`sd_listen_fds`,
   see `web.SystemdListeners` — hand-rolled, no go-systemd for fifteen lines).
@@ -69,7 +83,8 @@ since rewritten in Go.
   `--socket` for the Unix one), so the dev loop is unchanged.
 - Privilege model: `odioctl web` runs as the odios target user (systemd --user)
   and edits state.json directly; only `config.txt` writes escalate through
-  `sudo -n odioctl dac set <id>` / `dac unset`. The reboot the DAC change
+  `sudo -n odioctl dac set <id>` / `dac unset` and `input ir set <pin>` /
+  `input ir unset`. The reboot such a change
   waits for ("Reboot now" on its banner, `POST /reboot`) is `systemctl
   reboot` as that user: odios' polkit rule (`10-allow-shutdown.rules`) lets
   the target user reboot through logind, no sudo, no D-Bus library — the
@@ -170,7 +185,7 @@ since rewritten in Go.
   no JSON API, no script of our own. `web/static/htmx.min.js` and
   `htmx-sse.js` are odio-api's copies (same version, keep them so). The
   body opens `GET /events` (`sse-connect`) on load and keeps it. The page
-  is the `web.sections` table — `banners`, `upgrade`, `components`, `dac`,
+  is the `web.sections` table — `banners`, `upgrade`, `components`, `dac`, `input`,
   each a name, a template `<name>.gohtml` and a view func — rendered in that
   order by `RenderPage` and sent as named events by the stream: all of them
   on connect, then only what a change named. Every mutation ends in
@@ -229,11 +244,12 @@ make deb     # cross-compiles amd64/armhf/arm64 and packages via nfpm
 ## Layout
 
 `versions`, `state`, `manifest`, `netinfo`, `fsutil`, `procutil`, `components`,
-`dac` (+ `dac/gen`, the sudoers generator), `upgrade` (check/apply/verify),
+`configtxt`, `input`, `dac` (+ `dac/gen`, the sudoers generator, hence after
+`input`), `upgrade` (check/apply/verify),
 `motd` (the login banner), `web`
 (config, app — what the handlers hold — and one file per thing that lives
-between requests: changes, actions, upgrades; components and dac for the
-writes; render, server, socket + `templates/`, `static/`),
+between requests: changes, actions, upgrades; components, dac and input for
+the writes; render, server, socket + `templates/`, `static/`),
 `cli`, `main.go` — that is also the import order, no cycles. `config/` holds
 the ldflags-injected version. `data/` (systemd --user units, sudoers),
 `debian/` (postinst, copyright — nfpm.yaml is the package recipe).
