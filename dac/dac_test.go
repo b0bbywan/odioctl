@@ -126,32 +126,37 @@ func TestApplyIdempotentAndSwitch(t *testing.T) {
 	}
 }
 
-func TestOnboardSetsAudioOnWithoutOverlay(t *testing.T) {
-	out := Apply(fixture, entry(t, Onboard))
-	_, block, _ := strings.Cut(out, Begin)
-	if !strings.Contains(block, "dtparam=audio=on") {
-		t.Error("audio should be on")
+// The Pi's own output is what Reset gives back, never a choice: a block can
+// only turn it off.
+func TestOnboardIsNotAChoice(t *testing.T) {
+	if _, ok := ByID(Onboard); ok {
+		t.Error("onboard is in the catalog")
 	}
-	block, _, _ = strings.Cut(block, End)
-	if strings.Contains(block, "dtoverlay") {
-		t.Errorf("onboard block carries an overlay: %q", block)
+	if strings.Contains(Apply(fixture, entry(t, "hifiberry-dac")), "\ndtparam=audio=on\n") {
+		t.Error("a block turned audio on")
+	}
+}
+
+// odioctl 0.4.0 wrote an onboard block: still read, and Reset removes it.
+func TestAnEarlierOnboardBlockIsReadAndReset(t *testing.T) {
+	text := Begin + "\n[all]\ndtparam=audio=on\n" + End + "\n\n" + "camera_auto_detect=1\n"
+	if p := Parse(text); p.Current != Onboard || !p.Managed {
+		t.Errorf("parse = %+v", p)
+	}
+	if got := Unapply(text); got != "camera_auto_detect=1\n" {
+		t.Errorf("unapply = %q", got)
 	}
 }
 
 // vc4-kms-v3d disables snd_bcm2835's legacy HDMI card; an audio=on landing
-// after it brings that dead card back, so our block goes first — which is
-// also what leaves `dtparam=` on the base DTB, no overlay being open yet.
+// after it brings that dead card back, so our block goes first.
 func TestAudioParamComesBeforeTheFilesOverlays(t *testing.T) {
-	for _, id := range []string{Onboard, "hifiberry-dacplus-std"} {
-		out := Apply(fixture+"dtoverlay=vc4-kms-v3d\n", entry(t, id))
-		lines := strings.Split(out, "\n")
-		audio := slices.IndexFunc(lines, func(l string) bool {
-			return strings.HasPrefix(l, "dtparam=audio=")
-		})
-		vc4 := slices.Index(lines, "dtoverlay=vc4-kms-v3d")
-		if lines[0] != Begin || audio < 0 || vc4 < 0 || audio >= vc4 {
-			t.Errorf("%s: first = %q, audio at %d, vc4 at %d", id, lines[0], audio, vc4)
-		}
+	out := Apply(fixture+"dtoverlay=vc4-kms-v3d\n", entry(t, "hifiberry-dacplus-std"))
+	lines := strings.Split(out, "\n")
+	audio := slices.Index(lines, "dtparam=audio=off")
+	vc4 := slices.Index(lines, "dtoverlay=vc4-kms-v3d")
+	if lines[0] != Begin || audio < 0 || vc4 < 0 || audio >= vc4 {
+		t.Errorf("first = %q, audio at %d, vc4 at %d", lines[0], audio, vc4)
 	}
 }
 

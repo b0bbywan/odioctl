@@ -208,7 +208,7 @@ func writeConfig(t *testing.T) string {
 
 func TestDacListContainsCatalog(t *testing.T) {
 	rc, out, _ := run(t, "dac", "list")
-	if rc != 0 || !strings.Contains(out, "hifiberry-dacplus") || !strings.Contains(out, dac.Onboard) {
+	if rc != 0 || !strings.Contains(out, "hifiberry-dacplus") || strings.Contains(out, dac.Onboard) {
 		t.Errorf("rc = %d", rc)
 	}
 }
@@ -216,7 +216,7 @@ func TestDacListContainsCatalog(t *testing.T) {
 func TestDacStatusUnmanaged(t *testing.T) {
 	cfg := writeConfig(t)
 	rc, out, _ := run(t, "dac", "status", "--config", cfg)
-	if rc != 0 || !strings.Contains(out, "current:  onboard") || !strings.Contains(out, "managed:  no") {
+	if rc != 0 || !strings.Contains(out, "current:  onboard the Pi's own audio, no DAC") || !strings.Contains(out, "managed:  no") {
 		t.Errorf("rc = %d, out = %q", rc, out)
 	}
 }

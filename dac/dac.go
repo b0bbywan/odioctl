@@ -10,10 +10,11 @@
 //
 // First, because the file's overlays must come after: `vc4-kms-v3d` disables
 // snd_bcm2835's legacy HDMI card, and an `audio=on` landing after it brings
-// that dead card back (PulseAudio then picks it — vchi timeouts). It is also
-// what puts `dtparam=` on the base DTB, no overlay being open yet. [all]
-// resets any filter section, and stray audio lines are commented out with
-// DisabledPrefix so `dac unset` restores them. Writing needs root.
+// that dead card back (PulseAudio then picks it — vchi timeouts). A HAT's
+// EEPROM overlay is still open there and may take `audio=off`: harmless, it
+// only restates the defaults. [all] resets any filter section, and stray audio
+// lines are commented out with DisabledPrefix so `dac unset` restores them.
+// Writing needs root.
 package dac
 
 import (
@@ -39,6 +40,8 @@ const (
 	End            = "# END odioctl dac"
 	DisabledPrefix = "#odioctl-disabled: "
 
+	// Onboard is how Parse reads `audio=on` without an overlay: the Pi's own
+	// output, not a choice — Reset gives it back. odioctl 0.4.0 could write it.
 	Onboard = "onboard"
 )
 
@@ -48,11 +51,8 @@ type Entry struct {
 	Params string `json:"params"`
 }
 
-// OverlayLine is the config.txt line, "" for onboard audio (no overlay).
+// OverlayLine is the config.txt line.
 func (e Entry) OverlayLine() string {
-	if e.ID == Onboard {
-		return ""
-	}
 	if e.Params != "" {
 		return "dtoverlay=" + e.ID + "," + e.Params
 	}
@@ -60,7 +60,6 @@ func (e Entry) OverlayLine() string {
 }
 
 var Catalog = []Entry{
-	{ID: Onboard, Label: "Onboard audio (3.5mm jack / HDMI)"},
 	// Generic I2S
 	{ID: "i2s-dac", Label: "Generic passive I2S DAC (Pi as clock master)"},
 	{ID: "i2s-master-dac", Label: "Generic I2S DAC acting as clock master"},
@@ -165,8 +164,8 @@ var (
 // IsAudioOverlay reports whether the catalog knows this overlay. Anything
 // else is left alone: guessing from a name is not a claim we can make.
 func IsAudioOverlay(name string) bool {
-	e, ok := ByID(name)
-	return ok && e.ID != Onboard
+	_, ok := ByID(name)
+	return ok
 }
 
 func isAudioLine(line string) bool {
@@ -230,15 +229,7 @@ func Parse(text string) ParsedConfig {
 }
 
 func renderBlock(e Entry) []string {
-	audio := "off"
-	if e.ID == Onboard {
-		audio = "on"
-	}
-	lines := []string{Begin, "[all]", "dtparam=audio=" + audio}
-	if dto := e.OverlayLine(); dto != "" {
-		lines = append(lines, dto)
-	}
-	return append(lines, End)
+	return []string{Begin, "[all]", "dtparam=audio=off", e.OverlayLine(), End}
 }
 
 // trimBlank drops blank lines at both ends: the block is followed by one

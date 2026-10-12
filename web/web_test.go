@@ -1016,12 +1016,12 @@ func TestDacReapplyingTheCurrentSelectionIsANoOp(t *testing.T) {
 // never repair a config.txt whose audio line lands after vc4-kms-v3d.
 func TestDacSameIdInAnOlderLayoutStillApplies(t *testing.T) {
 	f := newFixture(t)
-	stale := configFixture + "\n" + dac.Begin + "\n[all]\ndtoverlay=\ndtparam=audio=on\n" + dac.End + "\n"
+	stale := configFixture + "\n" + dac.Begin + "\n[all]\ndtoverlay=\ndtparam=audio=off\ndtoverlay=hifiberry-dac\n" + dac.End + "\n"
 	if err := os.WriteFile(f.configPath, []byte(stale), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, body := f.post("/dac", url.Values{"id": {"onboard"}}, true)
-	wants(t, body, "DAC set to onboard")
+	_, body := f.post("/dac", url.Values{"id": {"hifiberry-dac"}}, true)
+	wants(t, body, "DAC set to hifiberry-dac")
 	text, _ := dac.ReadConfig(f.configPath)
 	if !strings.HasPrefix(text, dac.Begin) || strings.Contains(text, "\ndtoverlay=\n") {
 		t.Errorf("block not rewritten:\n%s", text)
@@ -1029,14 +1029,33 @@ func TestDacSameIdInAnOlderLayoutStillApplies(t *testing.T) {
 }
 
 func TestDacSameIdOverUnmanagedConfigStillApplies(t *testing.T) {
-	// config.txt says audio=on (current: onboard) but odioctl owns nothing
-	// yet: applying "onboard" must take ownership of the block.
+	// config.txt already loads the overlay but odioctl owns nothing yet:
+	// applying that id must take ownership of the block.
 	f := newFixture(t)
-	_, body := f.post("/dac", url.Values{"id": {"onboard"}}, true)
-	wants(t, body, "DAC set to onboard", "reboot required")
+	if err := os.WriteFile(f.configPath, []byte(configFixture+"dtoverlay=hifiberry-dac\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, body := f.post("/dac", url.Values{"id": {"hifiberry-dac"}}, true)
+	wants(t, body, "DAC set to hifiberry-dac", "reboot required")
 	text, _ := dac.ReadConfig(f.configPath)
 	if !dac.Parse(text).Managed {
 		t.Error("block not taken over")
+	}
+}
+
+// The Pi's own audio is no option: the placeholder shows, not the first DAC,
+// and posting it never escalates.
+func TestDacOnboardIsNoOption(t *testing.T) {
+	f := newFixture(t)
+	_, page := f.get("/")
+	wants(t, page, `<option value="" disabled selected>`, "Current: onboard")
+	if strings.Contains(page, `value="onboard"`) {
+		t.Error("onboard offered")
+	}
+	_, body := f.post("/dac", url.Values{"id": {"onboard"}}, true)
+	wants(t, body, "unknown DAC id")
+	if len(f.privileged) != 0 {
+		t.Errorf("privileged = %v", f.privileged)
 	}
 }
 

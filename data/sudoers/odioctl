@@ -17,7 +17,6 @@ Defaults:%:odioctl env_keep += "XDG_RUNTIME_DIR"
 
 %:odioctl ALL=(root) NOPASSWD: /usr/bin/odioctl upgrade apply --progress
 %:odioctl ALL=(root) NOPASSWD: /usr/bin/odioctl dac unset
-%:odioctl ALL=(root) NOPASSWD: /usr/bin/odioctl dac set onboard
 %:odioctl ALL=(root) NOPASSWD: /usr/bin/odioctl dac set i2s-dac
 %:odioctl ALL=(root) NOPASSWD: /usr/bin/odioctl dac set i2s-master-dac
 %:odioctl ALL=(root) NOPASSWD: /usr/bin/odioctl dac set hifiberry-dac

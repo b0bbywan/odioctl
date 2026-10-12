@@ -6,5 +6,6 @@
   {{if .Managed}}<form hx-post="dac/unset" hx-target="#notice" hx-swap="innerHTML"><input type="hidden" name="token" value="{{.Token}}"><button type="submit">Reset</button></form>{{end}}
 </div>
 <p class="hint">{{.Current}}</p>
+<p class="hint">USB DACs are plug and play: pick yours under <b>Audio Server › Default Sink</b>.</p>
 {{if .Stray}}<div class="banner warn">{{.Stray}}</div>{{end}}
 {{end}}</section>
