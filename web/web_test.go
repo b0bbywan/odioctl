@@ -18,6 +18,7 @@ import (
 	"github.com/b0bbywan/odioctl/components"
 	"github.com/b0bbywan/odioctl/configtxt"
 	"github.com/b0bbywan/odioctl/dac"
+	"github.com/b0bbywan/odioctl/input"
 	"github.com/b0bbywan/odioctl/manifest"
 	"github.com/b0bbywan/odioctl/state"
 	"github.com/b0bbywan/odioctl/upgrade"
@@ -26,7 +27,7 @@ import (
 const configFixture = "dtparam=audio=on\n[all]\nenable_uart=1\n"
 
 // fixture boots a real HTTP server on tmp state/config with every subprocess
-// seam replaced: privileged runs call the dac runners in-process, user runs
+// seam replaced: privileged runs call the dac and input runners in-process, user runs
 // are recorded, spawns run a shell stand-in for `qbzd login`.
 type fixture struct {
 	t          *testing.T
@@ -107,7 +108,7 @@ func newFixture(t *testing.T) *fixture {
 	}
 	cfg := Config{StatePath: f.statePath, ConfigTxt: f.configPath, Home: f.dir, RuntimeDir: filepath.Join(f.dir, "run")}
 	f.app = NewApp(cfg, Runners{
-		// Stand-in for `sudo -n odioctl dac …`: the same code path, in-process.
+		// Stand-in for `sudo -n odioctl dac|input …`: the same code path, in-process.
 		Privileged: func(args []string) (RunResult, error) {
 			f.privileged = append(f.privileged, args)
 			return f.runDacInProcess(args), nil
@@ -138,18 +139,22 @@ func newFixture(t *testing.T) *fixture {
 func (f *fixture) runDacInProcess(args []string) RunResult {
 	var out, errb strings.Builder
 	rc := 2
-	if len(args) >= 2 && args[0] == "dac" {
+	if len(args) >= 2 {
 		config := ""
 		for i, a := range args {
 			if a == "--config" && i+1 < len(args) {
 				config = args[i+1]
 			}
 		}
-		switch args[1] {
-		case "set":
+		switch argv := strings.Join(args, " ") + " "; {
+		case strings.HasPrefix(argv, "dac set "):
 			rc = dac.RunSet(&out, &errb, args[2], config, false)
-		case "unset":
+		case strings.HasPrefix(argv, "dac unset "):
 			rc = dac.RunUnset(&out, &errb, config, false)
+		case strings.HasPrefix(argv, "input ir set "):
+			rc = input.RunSetIR(&out, &errb, args[3], config, false)
+		case strings.HasPrefix(argv, "input ir unset "):
+			rc = input.RunUnsetIR(&out, &errb, config, false)
 		}
 	}
 	return RunResult{Stdout: out.String(), Stderr: errb.String(), Code: rc}
@@ -473,13 +478,14 @@ func TestEventsStreamCarriesTheSectionsAsTheActionExits(t *testing.T) {
 
 	// on connect, the state now: the row with its link, every section named
 	s := f.openStream()
-	first := s.until("event: dac")
+	first := s.until("event: input")
 	wants(t, first,
 		"event: banners\ndata: <div id=\"banners\" sse-swap=\"banners\" hx-swap=\"outerHTML\">",
 		"event: upgrade\ndata: <section id=\"upgrade\" sse-swap=\"upgrade\" hx-swap=\"outerHTML\">",
 		"event: components\ndata: <section id=\"components\" sse-swap=\"components\" hx-swap=\"outerHTML\">",
 		`href="https://qobuz.test/oauth?id=1"`,
-		"event: dac\ndata: <section id=\"dac\" sse-swap=\"dac\" hx-swap=\"outerHTML\">")
+		"event: dac\ndata: <section id=\"dac\" sse-swap=\"dac\" hx-swap=\"outerHTML\">",
+		"event: input\ndata: <section id=\"input\" sse-swap=\"input\" hx-swap=\"outerHTML\">")
 	if strings.Contains(first, "event: modal-") {
 		t.Error("a modal on the stream before its action ended")
 	}
@@ -493,7 +499,7 @@ func TestEventsStreamCarriesTheSectionsAsTheActionExits(t *testing.T) {
 	if strings.Contains(batch, `href="https://qobuz.test`) {
 		t.Error("the link survived the end of the run")
 	}
-	for _, untouched := range []string{"event: upgrade\n", "event: dac\n", "event: banners\n", "event: end"} {
+	for _, untouched := range []string{"event: upgrade\n", "event: dac\n", "event: input\n", "event: banners\n", "event: end"} {
 		if strings.Contains(batch, untouched) {
 			t.Errorf("an action's end sent %q", untouched)
 		}
@@ -504,7 +510,7 @@ func TestPostAnswersTheNoticeAndTheStreamTheState(t *testing.T) {
 	f := newFixture(t)
 	f.installQbzd()
 	s := f.openStream()
-	s.until("event: dac")
+	s.until("event: input")
 	// an action: the notice, with the modal out of band; the row's link on
 	// the stream
 	code, body := f.post("/components/action", url.Values{"kind": {"role"}, "name": {"qbzd"}, "action": {"login"}}, true)
@@ -526,7 +532,7 @@ func TestPostAnswersTheNoticeAndTheStreamTheState(t *testing.T) {
 	wants(t, body, `<div class="banner ok">Qobuz Connect disabled`)
 	batch = s.until("Qobuz Connect — removed on the next upgrade, click to keep")
 	wants(t, batch, "event: upgrade\n", "event: components\n", `<div id="row-role-qbzd" class="card">`)
-	if strings.Contains(batch, "event: dac\n") || strings.Contains(batch, "event: banners\n") {
+	if strings.Contains(batch, "event: dac\n") || strings.Contains(batch, "event: input\n") || strings.Contains(batch, "event: banners\n") {
 		t.Error("a toggle re-sent sections it does not touch")
 	}
 	// a bad token: 403, and still a notice
@@ -849,7 +855,7 @@ func TestApplyNowStartsAndWatchesTheUserUnit(t *testing.T) {
 	// the unit ends having installed qbzd: the watcher notes it, the stream
 	// says so, the card and the row show it
 	s := f.openStream()
-	wants(t, s.until("event: dac"), "Upgrading…")
+	wants(t, s.until("event: input"), "Upgrading…")
 	f.installQbzd()
 	unit.set("inactive", "success", 0)
 	batch := s.until("Qobuz Connect — installed, click to disable")
@@ -858,8 +864,8 @@ func TestApplyNowStartsAndWatchesTheUserUnit(t *testing.T) {
 	if strings.Contains(batch, "Upgrade started.") {
 		t.Error("the POST's notice is not the stream's to carry")
 	}
-	if strings.Contains(batch, "event: dac\n") {
-		t.Error("an upgrade's end re-sent the DAC section")
+	if strings.Contains(batch, "event: dac\n") || strings.Contains(batch, "event: input\n") {
+		t.Error("an upgrade's end re-sent the DAC or the input section")
 	}
 	if !f.waitWatcherGone() {
 		t.Fatal("watcher still running")
@@ -967,14 +973,73 @@ func TestRebootRefusedShowsOnTheBanners(t *testing.T) {
 	f := newFixture(t)
 	f.userFail = "Interactive authentication required."
 	s := f.openStream()
-	s.until("event: dac") // the connect batch, dac last
+	s.until("event: input") // the connect batch, input last
 	_, body := f.post("/reboot", url.Values{}, true)
 	wants(t, body, `<div class="banner ok">Rebooting`) // answered before the refusal
 	f.waitUser()
 	got := s.until("event: banners")
 	wants(t, got, "Reboot failed: systemctl reboot failed: Interactive authentication required.")
-	if strings.Contains(got, "event: dac") {
-		t.Error("the refusal re-sent the dac section")
+	if strings.Contains(got, "event: dac") || strings.Contains(got, "event: input") {
+		t.Error("the refusal re-sent the dac or the input section")
+	}
+}
+
+func TestIRSetRunsPrivilegedAndTheStreamFollows(t *testing.T) {
+	f := newFixture(t)
+	_, body := f.get("/")
+	wants(t, body, "<h2>Infrared receiver</h2>", `<option value="25">GPIO 25</option>`,
+		"No infrared receiver configured")
+	if strings.Contains(body, `<option value="18"`) || strings.Contains(body, `hx-post="input/ir/unset"`) {
+		t.Error("the I2S clock is offered, or a Reset with nothing to reset")
+	}
+	s := f.openStream()
+	s.until("event: input")
+
+	_, body = f.post("/input/ir", url.Values{"pin": {"25"}}, true)
+	wants(t, body, "IR receiver set on GPIO 25", "reboot required")
+	if len(f.privileged) != 1 || strings.Join(f.privileged[0][:4], " ") != "input ir set 25" {
+		t.Fatalf("privileged = %v", f.privileged)
+	}
+	text, _ := configtxt.Read(f.configPath)
+	if !strings.Contains(text, "dtoverlay=gpio-ir,gpio_pin=25\n") || input.Parse(text).IRPin != 25 {
+		t.Errorf("config.txt:\n%s", text)
+	}
+	batch := s.until("event: input")
+	wants(t, batch, "A reboot is required", `<option value="25" selected>GPIO 25</option>`,
+		"Current: GPIO 25 (managed by odioctl)", `hx-post="input/ir/unset"`)
+	if strings.Contains(batch, "event: dac\n") {
+		t.Error("an IR change re-sent the DAC section")
+	}
+
+	// the same pin again: no sudo, no reboot claimed
+	_, body = f.post("/input/ir", url.Values{"pin": {"25"}}, true)
+	wants(t, body, "already on GPIO 25")
+	// a pin that is none of ours never reaches sudo
+	for _, pin := range []string{"18", "", "25 --config /etc/passwd"} {
+		if _, body := f.post("/input/ir", url.Values{"pin": {pin}}, true); !strings.Contains(body, `<div class="banner err">invalid GPIO`) {
+			t.Errorf("pin %q: body = %q", pin, body)
+		}
+	}
+	if len(f.privileged) != 1 {
+		t.Errorf("privileged = %v", f.privileged)
+	}
+
+	_, body = f.post("/input/ir/unset", url.Values{}, true)
+	wants(t, body, "IR receiver removed")
+	if text, _ := configtxt.Read(f.configPath); text != configFixture {
+		t.Errorf("config.txt not restored:\n%s", text)
+	}
+}
+
+func TestInputSectionIsHiddenWithoutConfigTxt(t *testing.T) {
+	f := newFixture(t)
+	if err := os.Remove(f.configPath); err != nil {
+		t.Fatal(err)
+	}
+	_, body := f.get("/")
+	wants(t, body, `<section id="input" sse-swap="input" hx-swap="outerHTML" hidden>`, "No config.txt: not a Raspberry Pi.")
+	if strings.Contains(body, `hx-post="input/ir"`) {
+		t.Error("an IR form without a config.txt")
 	}
 }
 

@@ -9,11 +9,14 @@ import (
 	"fmt"
 	"html/template"
 	"os"
+	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/b0bbywan/odioctl/components"
 	"github.com/b0bbywan/odioctl/config"
 	"github.com/b0bbywan/odioctl/dac"
+	"github.com/b0bbywan/odioctl/input"
 	"github.com/b0bbywan/odioctl/state"
 	"github.com/b0bbywan/odioctl/upgrade"
 )
@@ -101,6 +104,20 @@ type dacView struct {
 	Token, Current string
 	Managed        bool
 	Options        []dacOptionView
+	Stray          string
+}
+
+type pinOptionView struct {
+	Pin, Text          string
+	Disabled, Selected bool
+}
+
+// inputView is hidden without a config.txt: the DAC section already says so.
+type inputView struct {
+	Supported      bool
+	Token, Current string
+	Managed        bool
+	IRPins         []pinOptionView
 	Stray          string
 }
 
@@ -285,6 +302,41 @@ func dacViewOf(app *App, d dac.Status) dacView {
 	return view
 }
 
+func inputViewOf(app *App, s input.Status) inputView {
+	if !s.Supported {
+		return inputView{}
+	}
+	view := inputView{
+		Supported: true,
+		Token:     app.Token(),
+		Managed:   s.Managed,
+		IRPins: []pinOptionView{
+			// also when the file's own line names a pin that is none of ours (the overlay's 18)
+			{Text: "— not configured —", Disabled: true, Selected: !slices.Contains(input.Pins, s.IRPin)},
+		},
+	}
+	for _, pin := range input.Pins {
+		view.IRPins = append(view.IRPins, pinOptionView{
+			Pin:      strconv.Itoa(pin),
+			Text:     fmt.Sprintf("GPIO %d", pin),
+			Selected: pin == s.IRPin,
+		})
+	}
+	switch {
+	case s.IRPin != 0 && s.Managed:
+		view.Current = fmt.Sprintf("Current: GPIO %d (managed by odioctl)", s.IRPin)
+	case s.IRPin != 0:
+		view.Current = fmt.Sprintf("Current: GPIO %d (from existing config.txt)", s.IRPin)
+	default:
+		view.Current = "No infrared receiver configured"
+	}
+	if len(s.StrayLines) > 0 && s.Managed {
+		view.Stray = "gpio-ir lines outside the odioctl block (commented out on Apply): " +
+			strings.Join(s.StrayLines, "; ")
+	}
+	return view
+}
+
 func upgradeViewOf(app *App, report *upgrade.Report) upgradeView {
 	running, note := app.upgrades.State(report)
 	view := upgradeView{Running: running, Note: note}
@@ -338,7 +390,7 @@ func noticeViewOf(msg, errText string, modal *ActionResult) noticeView {
 	return view
 }
 
-// bannersView is what holds across renders: the reboot the DAC change
+// bannersView is what holds across renders: the reboot a config.txt change
 // waits for, with the button that does it, and the refusal of the last one.
 type bannersView struct {
 	RebootRequired bool
@@ -373,6 +425,7 @@ var sections = []Section{
 	{"upgrade", func(app *App) any { return upgradeViewOf(app, app.UpgradeReport()) }},
 	{"components", func(app *App) any { st, err := stateOf(app); return componentsViewOf(app, st, err) }},
 	{"dac", func(app *App) any { return dacViewOf(app, app.DacStatus()) }},
+	{"input", func(app *App) any { return inputViewOf(app, app.InputStatus()) }},
 }
 
 // SectionNames is every section, what a stream sends first.
