@@ -8,7 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/b0bbywan/odioctl/configtxt"
 	"github.com/b0bbywan/odioctl/dac"
+	"github.com/b0bbywan/odioctl/input"
 	"github.com/b0bbywan/odioctl/state"
 )
 
@@ -78,7 +80,7 @@ func TestUnknownCommandReturns2(t *testing.T) {
 }
 
 func TestSubcommandsWithoutArgsError(t *testing.T) {
-	for _, argv := range [][]string{{"upgrade"}, {"dac"}, {"components"}} {
+	for _, argv := range [][]string{{"upgrade"}, {"dac"}, {"input"}, {"components"}} {
 		if rc, _, _ := run(t, argv...); rc != 2 {
 			t.Errorf("%v: rc = %d, want 2", argv, rc)
 		}
@@ -96,6 +98,9 @@ func TestEverySubcommandHasHelp(t *testing.T) {
 		{"dac", "status", "--help"},
 		{"dac", "set", "--help"},
 		{"dac", "unset", "--help"},
+		{"input", "status", "--help"},
+		{"input", "ir", "set", "--help"},
+		{"input", "ir", "unset", "--help"},
 	} {
 		if rc, _, _ := run(t, argv...); rc != 0 {
 			t.Errorf("%v: rc = %d, want 0", argv, rc)
@@ -200,9 +205,9 @@ func writeConfig(t *testing.T) string {
 	if err := os.WriteFile(cfg, []byte(configFixture), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	old := dac.RebootFlag
-	dac.RebootFlag = filepath.Join(d, "run", "reboot-required")
-	t.Cleanup(func() { dac.RebootFlag = old })
+	old := configtxt.RebootFlag
+	configtxt.RebootFlag = filepath.Join(d, "run", "reboot-required")
+	t.Cleanup(func() { configtxt.RebootFlag = old })
 	return cfg
 }
 
@@ -234,7 +239,7 @@ func TestDacSetWritesBackupAndFlag(t *testing.T) {
 	if rc != 0 || !strings.Contains(out, "reboot required") {
 		t.Fatalf("rc = %d, out = %q", rc, out)
 	}
-	text, _ := dac.ReadConfig(cfg)
+	text, _ := configtxt.Read(cfg)
 	if dac.Parse(text).Current != "hifiberry-dacplus-std" {
 		t.Error("overlay not applied")
 	}
@@ -253,7 +258,7 @@ func TestDacDryRunWritesNothing(t *testing.T) {
 	if rc != 0 || !strings.Contains(out, dac.Begin) {
 		t.Fatalf("rc = %d", rc)
 	}
-	text, _ := dac.ReadConfig(cfg)
+	text, _ := configtxt.Read(cfg)
 	if text != configFixture {
 		t.Error("config was written")
 	}
@@ -296,7 +301,7 @@ func TestDacSetThenUnsetRestores(t *testing.T) {
 	if rc != 0 {
 		t.Fatalf("rc = %d", rc)
 	}
-	text, _ := dac.ReadConfig(cfg)
+	text, _ := configtxt.Read(cfg)
 	if text != configFixture {
 		t.Errorf("config = %q", text)
 	}
@@ -315,6 +320,61 @@ func TestDacMissingConfigReturns2(t *testing.T) {
 	rc, _, err := run(t, "dac", "set", "hifiberry-dac", "--config", "/nonexistent")
 	if rc != 2 || !strings.Contains(err, "/nonexistent not found") {
 		t.Errorf("rc = %d, stderr = %q", rc, err)
+	}
+}
+
+func TestInputIRSetStatusUnset(t *testing.T) {
+	cfg := writeConfig(t)
+	if rc, out, _ := run(t, "input", "status", "--config", cfg); rc != 0 || !strings.Contains(out, "ir:       (none)") {
+		t.Errorf("rc = %d, out = %q", rc, out)
+	}
+	// the pin first, as the sudoers lines have it; flags first, as typed
+	rc, out, _ := run(t, "input", "ir", "set", "--dry-run", "--config", cfg, "25")
+	if rc != 0 || !strings.Contains(out, "dtoverlay=gpio-ir,gpio_pin=25") || input.GetStatus(cfg).RebootRequired {
+		t.Errorf("dry-run: rc = %d, out = %q", rc, out)
+	}
+	rc, out, _ = run(t, "input", "ir", "set", "25", "--config", cfg)
+	if rc != 0 || !strings.Contains(out, "IR receiver set on GPIO 25") || !strings.Contains(out, "reboot required") {
+		t.Errorf("rc = %d, out = %q", rc, out)
+	}
+	if s := input.GetStatus(cfg); s.IRPin != 25 || !s.Managed || !s.RebootRequired {
+		t.Errorf("status = %+v", s)
+	}
+	if rc, out, _ := run(t, "input", "status", "--config", cfg); rc != 0 || !strings.Contains(out, "ir:       GPIO 25") {
+		t.Errorf("rc = %d, out = %q", rc, out)
+	}
+	if rc, out, _ := run(t, "input", "ir", "set", "25", "--config", cfg); rc != 0 || !strings.Contains(out, "no change") {
+		t.Errorf("rc = %d, out = %q", rc, out)
+	}
+	if rc, _, _ := run(t, "input", "ir", "unset", "--config", cfg); rc != 0 {
+		t.Errorf("unset: rc = %d", rc)
+	}
+	if text, _ := configtxt.Read(cfg); text != configFixture {
+		t.Errorf("not restored:\n%s", text)
+	}
+}
+
+func TestInputIRRefusesWhatIsNotAPinOfTheList(t *testing.T) {
+	cfg := writeConfig(t)
+	// 18 is the overlay's default and I2S's bit clock
+	for _, pin := range []string{"18", "2", "28", "gpio25"} {
+		if rc, _, err := run(t, "input", "ir", "set", pin, "--config", cfg); rc != 2 || !strings.Contains(err, "invalid GPIO") {
+			t.Errorf("%s: rc = %d, stderr = %q", pin, rc, err)
+		}
+	}
+	for _, argv := range [][]string{
+		{"input", "ir"},
+		{"input", "ir", "25"},
+		{"input", "ir", "set", "--config", cfg},
+		{"input", "ir", "set", "25", "26", "--config", cfg},
+		{"input", "ir", "unset", "25", "--config", cfg},
+	} {
+		if rc, _, err := run(t, argv...); rc != 2 || !strings.Contains(err, "usage:") {
+			t.Errorf("%v: rc = %d, stderr = %q", argv, rc, err)
+		}
+	}
+	if text, _ := configtxt.Read(cfg); text != configFixture {
+		t.Errorf("config.txt touched:\n%s", text)
 	}
 }
 

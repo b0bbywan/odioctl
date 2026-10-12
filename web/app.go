@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/b0bbywan/odioctl/dac"
+	"github.com/b0bbywan/odioctl/input"
 	"github.com/b0bbywan/odioctl/manifest"
 	"github.com/b0bbywan/odioctl/state"
 	"github.com/b0bbywan/odioctl/upgrade"
@@ -121,6 +122,10 @@ func (a *App) ReadState() (state.State, error) {
 
 func (a *App) DacStatus() dac.Status {
 	return dac.GetStatus(a.cfg.ConfigTxt)
+}
+
+func (a *App) InputStatus() input.Status {
+	return input.GetStatus(a.cfg.ConfigTxt)
 }
 
 func (a *App) UpgradeReport() *upgrade.Report {

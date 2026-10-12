@@ -13,14 +13,16 @@ import (
 
 const usageText = `usage: odioctl [--version] COMMAND
 
-odio system control: upgrades, components, DAC overlay and a local web UI.
+odio system control: upgrades, components, DAC and input overlays and a
+local web UI.
 
 commands:
   upgrade      check for / apply / verify odios upgrades
   pwa-url      print the PWA URL for this host
   components   list / enable / disable roles and features, set the audio server
   dac          select the DAC overlay in config.txt
-  web          serve the local web UI
+  input        set the remote controls' overlays in config.txt (infrared receiver)
+  web         serve the local web UI
   state        record what an odios run installed / show state.json (for odios)
   motd         print the login banner (odios hooks it into ~/.profile)
 `
@@ -46,6 +48,8 @@ func Run(stdout, stderr io.Writer, argv []string) int {
 		return runComponents(stdout, stderr, argv[1:])
 	case "dac":
 		return runDAC(stdout, stderr, argv[1:])
+	case "input":
+		return runInput(stdout, stderr, argv[1:])
 	case "web":
 		return runWeb(stdout, stderr, argv[1:])
 	case "state":

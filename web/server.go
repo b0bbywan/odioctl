@@ -49,6 +49,8 @@ func NewHandler(app *App) http.Handler {
 	mux.HandleFunc("POST /components/audioserver", h.form(h.setAudioserver))
 	mux.HandleFunc("POST /dac", h.form(h.setDAC))
 	mux.HandleFunc("POST /dac/unset", h.form(h.unsetDAC))
+	mux.HandleFunc("POST /input/ir", h.form(h.setIR))
+	mux.HandleFunc("POST /input/ir/unset", h.form(h.unsetIR))
 	mux.HandleFunc("POST /upgrade", h.form(h.startUpgrade))
 	mux.HandleFunc("POST /reboot", h.reboot)
 	return mux
@@ -161,6 +163,16 @@ func (h *handler) setDAC(form url.Values, _ string) (string, *ActionResult, erro
 
 func (h *handler) unsetDAC(url.Values, string) (string, *ActionResult, error) {
 	msg, err := h.app.UnsetDAC()
+	return msg, nil, err
+}
+
+func (h *handler) setIR(form url.Values, _ string) (string, *ActionResult, error) {
+	msg, err := h.app.SetIR(form.Get("pin"))
+	return msg, nil, err
+}
+
+func (h *handler) unsetIR(url.Values, string) (string, *ActionResult, error) {
+	msg, err := h.app.UnsetIR()
 	return msg, nil, err
 }
 
