@@ -1023,7 +1023,7 @@ func TestDacSameIdInAnOlderLayoutStillApplies(t *testing.T) {
 	_, body := f.post("/dac", url.Values{"id": {"hifiberry-dac"}}, true)
 	wants(t, body, "DAC set to hifiberry-dac")
 	text, _ := dac.ReadConfig(f.configPath)
-	if !strings.HasPrefix(text, dac.Begin) || strings.Contains(text, "\ndtoverlay=\n") {
+	if !strings.HasPrefix(text, dac.Begin) || strings.Count(text, dac.Begin) != 1 {
 		t.Errorf("block not rewritten:\n%s", text)
 	}
 }
