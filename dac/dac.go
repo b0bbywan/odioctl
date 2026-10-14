@@ -4,17 +4,18 @@
 //
 //	# BEGIN odioctl dac -- managed block, edit with `odioctl dac`
 //	[all]
+//	dtoverlay=
 //	dtparam=audio=off
 //	dtoverlay=hifiberry-dacplus-std
 //	# END odioctl dac
 //
 // First, because the file's overlays must come after: `vc4-kms-v3d` disables
 // snd_bcm2835's legacy HDMI card, and an `audio=on` landing after it brings
-// that dead card back (PulseAudio then picks it — vchi timeouts). A HAT's
-// EEPROM overlay is still open there and may take `audio=off`: harmless, it
-// only restates the defaults. [all] resets any filter section, and stray audio
-// lines are commented out with DisabledPrefix so `dac unset` restores them.
-// Writing needs root.
+// that dead card back (PulseAudio then picks it — vchi timeouts). The empty
+// `dtoverlay=` before any other directive suppresses a HAT's EEPROM overlay:
+// the DAC picked here is the only one loaded. [all] resets any filter section,
+// and stray audio lines are commented out with DisabledPrefix so `dac unset`
+// restores them. Writing needs root.
 package dac
 
 import (
@@ -229,7 +230,7 @@ func Parse(text string) ParsedConfig {
 }
 
 func renderBlock(e Entry) []string {
-	return []string{Begin, "[all]", "dtparam=audio=off", e.OverlayLine(), End}
+	return []string{Begin, "[all]", "dtoverlay=", "dtparam=audio=off", e.OverlayLine(), End}
 }
 
 // trimBlank drops blank lines at both ends: the block is followed by one

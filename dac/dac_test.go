@@ -97,8 +97,10 @@ func TestApplyPutsTheBlockFirstAndDisablesStrayLines(t *testing.T) {
 		t.Error("audio=on still active")
 	}
 	lines := strings.Split(strings.TrimSuffix(out, "\n"), "\n")
-	head := lines[:6]
-	want := []string{Begin, "[all]", "dtparam=audio=off",
+	// The empty dtoverlay= ahead of any other directive suppresses a HAT's
+	// EEPROM overlay, which the firmware loads before config.txt.
+	head := lines[:7]
+	want := []string{Begin, "[all]", "dtoverlay=", "dtparam=audio=off",
 		"dtoverlay=hifiberry-dacplus-std", End, ""}
 	if !slices.Equal(head, want) {
 		t.Errorf("head = %v", head)
