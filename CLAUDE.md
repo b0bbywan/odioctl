@@ -48,8 +48,12 @@ since rewritten in Go.
 - **The DAC block goes first in config.txt**, before the file's own overlays:
   `vc4-kms-v3d` disables snd_bcm2835's legacy HDMI card, and a `dtparam=audio=on`
   after it brings that dead card back for PulseAudio to pick (vchi timeouts).
-  Being first also puts `dtparam=` on the base DTB, which the old trailing
-  block needed an empty `dtoverlay=` reset for.
+  The firmware loads a HAT's EEPROM overlay before config.txt; the block's
+  empty `dtoverlay=`, ahead of any other directive, suppresses it, so the
+  DAC picked is the only one loaded and `dtparam=` lands on the base DTB.
+  The block only ever says `audio=off`. The Pi's own audio is not a
+  catalog entry: Reset gives the file back (`dac.Onboard` is only how an
+  `audio=on` reads, 0.4.0's onboard block included).
 - **`data/sudoers/odioctl` is generated** from `dac.Catalog` by
   `go generate ./dac` (one explicit line per DAC id, no wildcards).
   Re-run it after touching the catalog; `dac/sudoers_test.go` fails on drift.
