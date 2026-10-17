@@ -1048,7 +1048,7 @@ func TestDacSameIdOverUnmanagedConfigStillApplies(t *testing.T) {
 func TestDacOnboardIsNoOption(t *testing.T) {
 	f := newFixture(t)
 	_, page := f.get("/")
-	wants(t, page, `<option value="" disabled selected>`, "Current: onboard")
+	wants(t, page, `<option value="" disabled selected>`, "No audio HAT: the Pi&#39;s own audio.")
 	if strings.Contains(page, `value="onboard"`) {
 		t.Error("onboard offered")
 	}
@@ -1057,6 +1057,17 @@ func TestDacOnboardIsNoOption(t *testing.T) {
 	if len(f.privileged) != 0 {
 		t.Errorf("privileged = %v", f.privileged)
 	}
+}
+
+// odioctl 0.4.0's onboard block: Reset is what removes it, and says so.
+func TestDacEarlierOnboardBlockOffersReset(t *testing.T) {
+	f := newFixture(t)
+	block := dac.Begin + "\n[all]\ndtparam=audio=on\n" + dac.End + "\n\n" + configFixture
+	if err := os.WriteFile(f.configPath, []byte(block), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, page := f.get("/")
+	wants(t, page, `hx-post="dac/unset"`, "from an older odioctl block: Reset gives config.txt back.")
 }
 
 func TestDacUnsetRestores(t *testing.T) {
