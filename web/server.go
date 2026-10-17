@@ -153,7 +153,7 @@ func (h *handler) componentAction(form url.Values, host string) (string, *Action
 func (h *handler) setDAC(form url.Values, _ string) (string, *ActionResult, error) {
 	id := form.Get("id")
 	if id == "" { // an empty select is not an unset — that is /dac/unset
-		return "", nil, userErrorf("no DAC selected")
+		return "", nil, userErrorf("no audio HAT selected")
 	}
 	msg, err := h.app.SetDAC(id)
 	return msg, nil, err

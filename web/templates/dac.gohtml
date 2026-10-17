@@ -1,5 +1,5 @@
 <section id="dac" sse-swap="dac" hx-swap="outerHTML">
-<h2>DAC</h2>
+<h2>Audio HAT</h2>
 {{if not .Supported}}<div class="banner warn">No config.txt: not a Raspberry Pi.</div>{{else}}
 <div class="row">
   <form hx-post="dac" hx-target="#notice" hx-swap="innerHTML" class="row"><input type="hidden" name="token" value="{{.Token}}"><select name="id">{{range .Options}}<option value="{{.ID}}"{{if .Disabled}} disabled{{end}}{{if .Selected}} selected{{end}}>{{.Text}}</option>{{end}}</select><button class="primary" type="submit">Apply</button></form>
