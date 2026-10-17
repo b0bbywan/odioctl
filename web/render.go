@@ -263,6 +263,10 @@ func dacViewOf(app *App, d dac.Status) dacView {
 		})
 	}
 	switch {
+	case d.Current == dac.Onboard && d.Managed:
+		view.Current = "The Pi's own audio, from an older odioctl block: Reset gives config.txt back."
+	case d.Current == dac.Onboard:
+		view.Current = "No audio HAT: the Pi's own audio."
 	case d.Current != "" && d.Managed:
 		view.Current = "Current: " + d.Current + " (managed by odioctl)"
 	case d.Current != "":
