@@ -252,7 +252,7 @@ func dacViewOf(app *App, d dac.Status) dacView {
 		Token:     app.Token(),
 		Managed:   d.Managed,
 		Options: []dacOptionView{
-			{ID: "", Text: "— not configured —", Disabled: true, Selected: !known},
+			{ID: "", Text: "— pick an audio HAT —", Disabled: true, Selected: !known},
 		},
 	}
 	for _, e := range dac.Catalog {
