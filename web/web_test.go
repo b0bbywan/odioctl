@@ -1044,11 +1044,12 @@ func TestDacSameIdOverUnmanagedConfigStillApplies(t *testing.T) {
 }
 
 // The Pi's own audio is no option: the placeholder shows, not the first DAC,
-// and posting it never escalates.
+// the browser refuses to send it, and posting it anyway never escalates.
 func TestDacOnboardIsNoOption(t *testing.T) {
 	f := newFixture(t)
 	_, page := f.get("/")
-	wants(t, page, `<option value="" disabled selected>`, "No audio HAT: the Pi&#39;s own audio.")
+	wants(t, page, `<select name="id" required>`, `<option value="" disabled selected>`,
+		"No audio HAT: the Pi&#39;s own audio.")
 	if strings.Contains(page, `value="onboard"`) {
 		t.Error("onboard offered")
 	}

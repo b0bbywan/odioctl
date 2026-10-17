@@ -324,6 +324,8 @@ a.btn { display: inline-block; text-decoration: none; }
 button.small { padding: 5px 10px; font-size: 13px; }
 /* The upgrade in progress: a button that says so and does nothing. */
 button:disabled { opacity: 0.6; cursor: default; pointer-events: none; }
+/* A required field still empty: the browser refuses the submit, say it first. */
+form:invalid button.primary { opacity: 0.6; cursor: not-allowed; }
 select { flex: 1 1 240px; min-width: 0; max-width: 100%; }
 form.row button { flex-shrink: 0; }
 select:focus, button:focus-visible, a.btn:focus-visible { outline: 2px solid rgba(90, 184, 30, 0.5); outline-offset: 1px; }
