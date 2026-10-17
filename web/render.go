@@ -270,7 +270,7 @@ func dacViewOf(app *App, d dac.Status) dacView {
 	case len(d.StrayLines) > 0:
 		view.Current = "Unrecognised audio configuration in config.txt: " + strings.Join(d.StrayLines, "; ")
 	default:
-		view.Current = "No DAC configured"
+		view.Current = "No audio HAT configured"
 	}
 	if len(d.StrayLines) > 0 && d.Managed {
 		// Unmanaged lines are simply what defines Current; once odioctl owns

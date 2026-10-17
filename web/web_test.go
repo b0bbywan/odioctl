@@ -942,7 +942,7 @@ func TestApplyWithNothingPendingIsRefused(t *testing.T) {
 func TestDacSetRunsPrivilegedAndMarksReboot(t *testing.T) {
 	f := newFixture(t)
 	_, body := f.post("/dac", url.Values{"id": {"hifiberry-dacplus-std"}}, true)
-	wants(t, body, "DAC set to hifiberry-dacplus-std", "reboot required")
+	wants(t, body, "Audio HAT set to hifiberry-dacplus-std", "reboot required")
 	if len(f.privileged) != 1 {
 		t.Fatalf("privileged = %v", f.privileged)
 	}
@@ -1003,7 +1003,7 @@ func TestDacReapplyingTheCurrentSelectionIsANoOp(t *testing.T) {
 	calls := len(f.privileged)
 	_, body := f.post("/dac", url.Values{"id": {"hifiberry-dacplus-std"}}, true)
 	wants(t, body, "nothing to apply")
-	if strings.Contains(body, "DAC set to") {
+	if strings.Contains(body, "Audio HAT set to") {
 		t.Error("a no-op must not claim a change")
 	}
 	if len(f.privileged) != calls {
@@ -1021,7 +1021,7 @@ func TestDacSameIdInAnOlderLayoutStillApplies(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, body := f.post("/dac", url.Values{"id": {"hifiberry-dac"}}, true)
-	wants(t, body, "DAC set to hifiberry-dac")
+	wants(t, body, "Audio HAT set to hifiberry-dac")
 	text, _ := dac.ReadConfig(f.configPath)
 	if !strings.HasPrefix(text, dac.Begin) || strings.Count(text, dac.Begin) != 1 {
 		t.Errorf("block not rewritten:\n%s", text)
@@ -1036,7 +1036,7 @@ func TestDacSameIdOverUnmanagedConfigStillApplies(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, body := f.post("/dac", url.Values{"id": {"hifiberry-dac"}}, true)
-	wants(t, body, "DAC set to hifiberry-dac", "reboot required")
+	wants(t, body, "Audio HAT set to hifiberry-dac", "reboot required")
 	text, _ := dac.ReadConfig(f.configPath)
 	if !dac.Parse(text).Managed {
 		t.Error("block not taken over")
@@ -1053,7 +1053,7 @@ func TestDacOnboardIsNoOption(t *testing.T) {
 		t.Error("onboard offered")
 	}
 	_, body := f.post("/dac", url.Values{"id": {"onboard"}}, true)
-	wants(t, body, "unknown DAC id")
+	wants(t, body, "unknown audio HAT id")
 	if len(f.privileged) != 0 {
 		t.Errorf("privileged = %v", f.privileged)
 	}
@@ -1072,7 +1072,7 @@ func TestDacUnsetRestores(t *testing.T) {
 func TestDacUnknownIdNeverEscalates(t *testing.T) {
 	f := newFixture(t)
 	_, body := f.post("/dac", url.Values{"id": {"pwn; rm -rf /"}}, true)
-	wants(t, body, "unknown DAC id")
+	wants(t, body, "unknown audio HAT id")
 	if len(f.privileged) != 0 {
 		t.Errorf("privileged = %v", f.privileged)
 	}
@@ -1081,7 +1081,7 @@ func TestDacUnknownIdNeverEscalates(t *testing.T) {
 func TestDacEmptyIdIsNotAnUnset(t *testing.T) {
 	f := newFixture(t)
 	_, body := f.post("/dac", url.Values{"id": {""}}, true)
-	wants(t, body, "no DAC selected")
+	wants(t, body, "no audio HAT selected")
 	if len(f.privileged) != 0 {
 		t.Errorf("privileged = %v", f.privileged)
 	}

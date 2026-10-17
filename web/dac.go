@@ -6,20 +6,20 @@ import "github.com/b0bbywan/odioctl/dac"
 func (a *App) SetDAC(id string) (string, error) {
 	entry, ok := dac.ByID(id)
 	if !ok {
-		return "", userErrorf("unknown DAC id %q", id)
+		return "", userErrorf("unknown audio HAT id %q", id)
 	}
 	// Re-applying the current selection is one click away, so catch the no-op
 	// rather than claim a reboot nothing needs. What config.txt would become
 	// decides, not the id: a block odioctl wrote in an older layout carries
 	// the same id and still has to be rewritten. Unreadable: let sudo judge.
 	if changed, err := dac.WouldChange(a.cfg.ConfigTxt, entry); err == nil && !changed {
-		return "DAC already set to " + id + " — nothing to apply.", nil
+		return "Audio HAT already set to " + id + " — nothing to apply.", nil
 	}
 	if err := a.runDac("dac", "set", id); err != nil {
 		return "", err
 	}
 	a.changes.Changed("banners", "dac")
-	return "DAC set to " + id + " — reboot required.", nil
+	return "Audio HAT set to " + id + " — reboot required.", nil
 }
 
 // UnsetDAC removes the odioctl block from config.txt, through sudo.
@@ -28,7 +28,7 @@ func (a *App) UnsetDAC() (string, error) {
 		return "", err
 	}
 	a.changes.Changed("banners", "dac")
-	return "DAC block removed — reboot required.", nil
+	return "Audio HAT block removed — reboot required.", nil
 }
 
 func (a *App) runDac(args ...string) error {
