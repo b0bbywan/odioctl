@@ -3,7 +3,6 @@ package cli
 import (
 	"io"
 
-	"github.com/b0bbywan/odioctl/dac"
 	"github.com/b0bbywan/odioctl/state"
 	"github.com/b0bbywan/odioctl/web"
 )
@@ -20,8 +19,8 @@ func runWeb(stdout, stderr io.Writer, args []string) int {
 	fs.StringVar(&cfg.UIURL, "ui-url", cfg.UIURL, "where the logo leads, absolute or from the root "+
 		"(default: $ODIOCTL_UI_URL, else http://<host>:8018/ui)")
 	fs.StringVar(&cfg.StatePath, "state", state.SystemStatePath, "path to state.json")
-	fs.StringVar(&cfg.ConfigTxt, "config", "", "path to config.txt (default: "+dac.ConfigTxt+"). "+
-		"Dev/test only: the sudoers rule does not admit --config, so DAC changes "+
+	fs.StringVar(&cfg.ConfigTxt, "config", "", configUsage+". "+
+		"Dev/test only: the sudoers rule does not admit --config, so DAC and input changes "+
 		"through sudo will be refused")
 	fs.StringVar(&cfg.UpgradesPath, "upgrades", "", "path to upgrades.json "+
 		"(default: "+state.SystemUpgradesPath+", or next to a custom --state)")

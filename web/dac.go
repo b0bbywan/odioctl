@@ -15,7 +15,7 @@ func (a *App) SetDAC(id string) (string, error) {
 	if changed, err := dac.WouldChange(a.cfg.ConfigTxt, entry); err == nil && !changed {
 		return "Audio HAT already set to " + id + " — nothing to apply.", nil
 	}
-	if err := a.runDac("dac", "set", id); err != nil {
+	if err := a.runConfigTxt("dac", "set", id); err != nil {
 		return "", err
 	}
 	a.changes.Changed("banners", "dac")
@@ -24,21 +24,23 @@ func (a *App) SetDAC(id string) (string, error) {
 
 // UnsetDAC removes the odioctl block from config.txt, through sudo.
 func (a *App) UnsetDAC() (string, error) {
-	if err := a.runDac("dac", "unset"); err != nil {
+	if err := a.runConfigTxt("dac", "unset"); err != nil {
 		return "", err
 	}
 	a.changes.Changed("banners", "dac")
 	return "Audio HAT block removed — reboot required.", nil
 }
 
-func (a *App) runDac(args ...string) error {
+// runConfigTxt is `sudo -n odioctl …`, what writes config.txt.
+func (a *App) runConfigTxt(args ...string) error {
+	what := "odioctl " + args[0]
 	if a.cfg.ConfigTxt != "" {
 		args = append(args, "--config", a.cfg.ConfigTxt)
 	}
-	return runChecked(a.run.Privileged, args, "odioctl dac")
+	return runChecked(a.run.Privileged, args, what)
 }
 
-// Reboot is the reboot the DAC change waits for: logind as the target user
+// Reboot is the reboot a config.txt change waits for: logind as the target user
 // (odios' polkit rule, no sudo), the flag under /run going with the boot.
 // The page already has its answer, so a refusal shows on the banners.
 func (a *App) Reboot() {

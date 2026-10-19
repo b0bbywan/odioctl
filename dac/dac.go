@@ -19,22 +19,12 @@
 package dac
 
 import (
-	"log/slog"
-	"os"
-	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
 
-	"github.com/b0bbywan/odioctl/fsutil"
+	"github.com/b0bbywan/odioctl/configtxt"
 )
-
-// ConfigTxt is where Raspberry Pi OS keeps config.txt since bookworm. The
-// pre-bookworm /boot/config.txt is not looked at: no legacy support.
-const ConfigTxt = "/boot/firmware/config.txt"
-
-// RebootFlag is a var so tests can point it into a tempdir.
-var RebootFlag = "/run/odioctl/reboot-required"
 
 const (
 	Begin          = "# BEGIN odioctl dac -- managed block, edit with `odioctl dac`"
@@ -45,6 +35,8 @@ const (
 	// output, not a choice — Reset gives it back. odioctl 0.4.0 could write it.
 	Onboard = "onboard"
 )
+
+var block = configtxt.Block{Begin: Begin, End: End, Disabled: DisabledPrefix}
 
 type Entry struct {
 	ID     string `json:"id"` // also the dtoverlay name
@@ -157,10 +149,7 @@ func ByID(id string) (Entry, bool) {
 	return Entry{}, false
 }
 
-var (
-	overlayRE = regexp.MustCompile(`^\s*dtoverlay\s*=\s*([^,\s]+)(?:,(.*))?\s*$`)
-	audioRE   = regexp.MustCompile(`(?i)^\s*dtparam\s*=\s*audio\s*=\s*(on|off)\s*$`)
-)
+var audioRE = regexp.MustCompile(`(?i)^\s*dtparam\s*=\s*audio\s*=\s*(on|off)\s*$`)
 
 // IsAudioOverlay reports whether the catalog knows this overlay. Anything
 // else is left alone: guessing from a name is not a claim we can make.
@@ -170,33 +159,17 @@ func IsAudioOverlay(name string) bool {
 }
 
 func isAudioLine(line string) bool {
-	if m := overlayRE.FindStringSubmatch(line); m != nil && IsAudioOverlay(m[1]) {
+	if name, _, ok := configtxt.Overlay(line); ok && IsAudioOverlay(name) {
 		return true
 	}
 	return audioRE.MatchString(line)
 }
 
-// splitBlock returns (before, block, after); block is nil when there is no
-// managed block, and a Begin without End swallows to EOF.
-func splitBlock(lines []string) (before, block, after []string) {
-	start := slices.Index(lines, Begin)
-	if start < 0 {
-		return lines, nil, nil
-	}
-	end := slices.Index(lines[start+1:], End)
-	if end < 0 {
-		end = len(lines) - 1
-	} else {
-		end += start + 1
-	}
-	return lines[:start], lines[start : end+1], lines[end+1:]
-}
-
 func entryForLines(lines []string) string {
 	audioOn := false
 	for _, line := range lines {
-		if m := overlayRE.FindStringSubmatch(line); m != nil && IsAudioOverlay(m[1]) {
-			return m[1]
+		if name, _, ok := configtxt.Overlay(line); ok && IsAudioOverlay(name) {
+			return name
 		}
 		if a := audioRE.FindStringSubmatch(line); a != nil && strings.EqualFold(a[1], "on") {
 			audioOn = true
@@ -215,7 +188,7 @@ type ParsedConfig struct {
 }
 
 func Parse(text string) ParsedConfig {
-	before, block, after := splitBlock(strings.Split(text, "\n"))
+	before, managed, after := block.Split(strings.Split(text, "\n"))
 	outside := slices.Concat(before, after)
 	var stray []string
 	for _, line := range outside {
@@ -223,8 +196,8 @@ func Parse(text string) ParsedConfig {
 			stray = append(stray, line)
 		}
 	}
-	if block != nil {
-		return ParsedConfig{Current: entryForLines(block), Managed: true, StrayLines: stray}
+	if managed != nil {
+		return ParsedConfig{Current: entryForLines(managed), Managed: true, StrayLines: stray}
 	}
 	return ParsedConfig{Current: entryForLines(outside), Managed: false, StrayLines: stray}
 }
@@ -233,30 +206,9 @@ func renderBlock(e Entry) []string {
 	return []string{Begin, "[all]", "dtoverlay=", "dtparam=audio=off", e.OverlayLine(), End}
 }
 
-// trimBlank drops blank lines at both ends: the block is followed by one
-// blank line of its own, and removing it must not leave a gap behind.
-func trimBlank(lines []string) []string {
-	for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
-		lines = lines[:len(lines)-1]
-	}
-	for len(lines) > 0 && strings.TrimSpace(lines[0]) == "" {
-		lines = lines[1:]
-	}
-	return lines
-}
-
 // Apply returns config.txt text with e selected. Idempotent.
 func Apply(text string, e Entry) string {
-	before, _, after := splitBlock(strings.Split(text, "\n"))
-	var body []string
-	for _, line := range slices.Concat(before, after) {
-		if isAudioLine(line) {
-			body = append(body, DisabledPrefix+line)
-		} else {
-			body = append(body, line)
-		}
-	}
-	body = trimBlank(body)
+	body := block.Rest(text, isAudioLine)
 	lines := renderBlock(e)
 	if len(body) > 0 {
 		lines = append(lines, "")
@@ -267,66 +219,18 @@ func Apply(text string, e Entry) string {
 // Unapply returns config.txt text with the managed block removed and disabled
 // lines restored.
 func Unapply(text string) string {
-	before, _, after := splitBlock(strings.Split(text, "\n"))
-	var body []string
-	for _, line := range slices.Concat(before, after) {
-		body = append(body, strings.TrimPrefix(line, DisabledPrefix))
-	}
-	body = trimBlank(body)
-	if len(body) == 0 {
-		return ""
-	}
-	return strings.Join(body, "\n") + "\n"
+	return block.Remove(text)
 }
 
 // WouldChange reports whether selecting e would rewrite path. The file
 // decides, not the id: a block of an older layout carrying the same id still
 // has to be moved.
 func WouldChange(path string, e Entry) (bool, error) {
-	if path == "" {
-		path = ConfigTxt
-	}
-	text, err := ReadConfig(path)
+	text, err := configtxt.Read(configtxt.Resolve(path))
 	if err != nil {
 		return false, err
 	}
 	return Apply(text, e) != text, nil
-}
-
-func isFile(path string) bool {
-	fi, err := os.Stat(path)
-	return err == nil && fi.Mode().IsRegular()
-}
-
-func ReadConfig(path string) (string, error) {
-	b, err := os.ReadFile(path)
-	return string(b), err
-}
-
-// WriteConfig keeps a one-time .odioctl.bak of the pristine file, then writes
-// atomically.
-func WriteConfig(path, text string) error {
-	backup := path + ".odioctl.bak"
-	if _, err := os.Stat(backup); os.IsNotExist(err) {
-		if orig, err := os.ReadFile(path); err == nil {
-			if err := os.WriteFile(backup, orig, 0o644); err != nil {
-				slog.Warn("could not write backup", "path", backup, "err", err)
-			}
-		}
-	}
-	return fsutil.AtomicWriteText(path, text)
-}
-
-func MarkRebootRequired() {
-	if err := os.MkdirAll(filepath.Dir(RebootFlag), 0o755); err != nil {
-		return
-	}
-	_ = os.WriteFile(RebootFlag, []byte("dac\n"), 0o644)
-}
-
-func RebootRequired() bool {
-	_, err := os.Stat(RebootFlag)
-	return err == nil
 }
 
 // Status is what the CLI and the web share about the current configuration.
@@ -339,15 +243,12 @@ type Status struct {
 	RebootRequired bool     `json:"reboot_required"`
 }
 
-// GetStatus inspects configPath ("" = ConfigTxt). A missing file reads as
-// Supported=false: not a Raspberry Pi.
+// GetStatus inspects configPath ("" = configtxt.Path). A missing file reads
+// as Supported=false: not a Raspberry Pi.
 func GetStatus(configPath string) Status {
-	path := configPath
-	if path == "" {
-		path = ConfigTxt
-	}
-	s := Status{Config: path, StrayLines: []string{}, RebootRequired: RebootRequired()}
-	text, err := ReadConfig(path)
+	path := configtxt.Resolve(configPath)
+	s := Status{Config: path, StrayLines: []string{}, RebootRequired: configtxt.RebootRequired()}
+	text, err := configtxt.Read(path)
 	if err != nil {
 		return s
 	}

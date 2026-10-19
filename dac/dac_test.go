@@ -6,6 +6,9 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/b0bbywan/odioctl/configtxt"
+	"github.com/b0bbywan/odioctl/input"
 )
 
 const fixture = `# For more options and information see
@@ -188,21 +191,38 @@ func TestUnapplyWithoutBlockIsNoop(t *testing.T) {
 	}
 }
 
-func TestWriteConfigKeepsAOneTimeBackup(t *testing.T) {
-	cfg := filepath.Join(t.TempDir(), "config.txt")
-	if err := os.WriteFile(cfg, []byte(fixture), 0o644); err != nil {
-		t.Fatal(err)
+// Two owners, two blocks: ours stays first, input's last, and neither's unset
+// takes the other's block or restores the other's lines.
+func TestTheInputBlockIsLeftAlone(t *testing.T) {
+	text := fixture + "dtoverlay=gpio-ir,gpio_pin=17\n"
+	both := input.ApplyIR(Apply(text, entry(t, "hifiberry-dacplus-std")), 25)
+	if again := Apply(input.ApplyIR(both, 25), entry(t, "hifiberry-dacplus-std")); again != both {
+		t.Errorf("not stable:\n%s", again)
 	}
-	applied := Apply(fixture, entry(t, "hifiberry-dacplus-std"))
-	if err := WriteConfig(cfg, applied); err != nil {
-		t.Fatal(err)
+	if other := Apply(input.ApplyIR(text, 25), entry(t, "hifiberry-dacplus-std")); other != both {
+		t.Errorf("the order of the writes shows:\n%s", other)
 	}
-	if err := WriteConfig(cfg, Apply(applied, entry(t, "hifiberry-dac"))); err != nil {
-		t.Fatal(err)
+	lines := strings.Split(strings.TrimSuffix(both, "\n"), "\n")
+	if lines[0] != Begin || lines[len(lines)-1] != input.End {
+		t.Errorf("first = %q, last = %q", lines[0], lines[len(lines)-1])
 	}
-	bak, err := os.ReadFile(cfg + ".odioctl.bak")
-	if err != nil || string(bak) != fixture {
-		t.Errorf("backup = %q, %v; want the pristine file", bak, err)
+	if p := Parse(both); p.Current != "hifiberry-dacplus-std" || !p.Managed {
+		t.Errorf("dac = %+v", p)
+	}
+	if p := input.Parse(both); p.IRPin != 25 || !p.Managed {
+		t.Errorf("input = %+v", p)
+	}
+
+	noDAC := Unapply(both)
+	if noDAC != input.ApplyIR(text, 25) {
+		t.Errorf("dac unset:\n%s", noDAC)
+	}
+	noIR := input.UnapplyIR(both)
+	if noIR != Apply(text, entry(t, "hifiberry-dacplus-std")) {
+		t.Errorf("input ir unset:\n%s", noIR)
+	}
+	if got := input.UnapplyIR(noDAC); got != text {
+		t.Errorf("both unset:\n%s", got)
 	}
 }
 
@@ -212,15 +232,15 @@ func TestStatusAndRebootFlag(t *testing.T) {
 	if err := os.WriteFile(cfg, []byte(fixture), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	old := RebootFlag
-	RebootFlag = filepath.Join(d, "run", "reboot-required")
-	t.Cleanup(func() { RebootFlag = old })
+	old := configtxt.RebootFlag
+	configtxt.RebootFlag = filepath.Join(d, "run", "reboot-required")
+	t.Cleanup(func() { configtxt.RebootFlag = old })
 
 	s := GetStatus(cfg)
 	if !s.Supported || s.Current != Onboard || s.Managed || s.RebootRequired {
 		t.Errorf("status = %+v", s)
 	}
-	MarkRebootRequired()
+	configtxt.MarkRebootRequired()
 	if !GetStatus(cfg).RebootRequired {
 		t.Error("reboot flag not seen")
 	}

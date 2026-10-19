@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/b0bbywan/odioctl/configtxt"
 )
 
 // RunList prints the catalog.
@@ -77,39 +79,10 @@ func RunUnset(stdout, stderr io.Writer, configPath string, dryRun bool) int {
 
 // runWrite rewrites config.txt for entry (nil = unset).
 func runWrite(stdout, stderr io.Writer, entry *Entry, configPath string, dryRun bool) int {
-	path := configPath
-	if path == "" {
-		path = ConfigTxt
-	}
-	if !isFile(path) {
-		fmt.Fprintf(stderr, "Error: %s not found — not a Raspberry Pi?\n", path)
-		return 2
-	}
-	text, err := ReadConfig(path)
-	if err != nil {
-		fmt.Fprintf(stderr, "Error reading %s: %v\n", path, err)
-		return 2
-	}
-	updated := Unapply(text)
-	what := "odioctl DAC block removed"
+	edit, done := Unapply, "odioctl DAC block removed"
 	if entry != nil {
-		updated = Apply(text, *entry)
-		what = "DAC set to " + entry.ID
+		edit = func(text string) string { return Apply(text, *entry) }
+		done = "DAC set to " + entry.ID
 	}
-
-	if dryRun {
-		fmt.Fprint(stdout, updated)
-		return 0
-	}
-	if updated == text {
-		fmt.Fprintln(stdout, "no change")
-		return 0
-	}
-	if err := WriteConfig(path, updated); err != nil {
-		fmt.Fprintf(stderr, "Error writing %s: %v\n", path, err)
-		return 2
-	}
-	MarkRebootRequired()
-	fmt.Fprintf(stdout, "%s in %s — reboot required\n", what, path)
-	return 0
+	return configtxt.RunEdit(stdout, stderr, configPath, dryRun, done, edit)
 }
