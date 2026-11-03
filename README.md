@@ -29,7 +29,7 @@
 node — upgrades, components and DAC selection today, and meant to grow with
 the rest of the node's settings. It started as a rewrite of the `odio-upgrade`
 script that used to ship inside [odios](https://github.com/b0bbywan/odios).
-A single static Go binary (stdlib plus fsnotify), packaged as per-arch `.deb`s on
+A single static Go binary (stdlib only), packaged as per-arch `.deb`s on
 [apt.odio.love](https://apt.odio.love).
 
 ## Install
@@ -72,7 +72,7 @@ odioctl upgrade verify [--state PATH] [--expected-version TAG]
 odioctl pwa-url
 odioctl components [--state PATH] list [--json] | enable NAME | disable NAME
 odioctl dac list [--json] | status [--json] | set ID [--dry-run] | unset
-odioctl web [--bind 0.0.0.0] [--port 8021] [--socket PATH] [--systemd-only] [--ui-url URL] [--state PATH] [--config PATH]
+odioctl web [--bind 0.0.0.0] [--port 8021] [--socket PATH] [--systemd-only] [--ui-url URL] [--odio-api URL] [--state PATH] [--config PATH]
 odioctl state [--state PATH] record < run.json | show
 odioctl motd [--state PATH]
 ```
@@ -221,6 +221,15 @@ The logo links to odio-ui at `http://<host>:8018/ui`, `<host>` being the name
 the browser used; `ODIOCTL_UI_URL` in `/etc/default/odioctl` (or `--ui-url`)
 replaces that guess, with an absolute URL or one from the root (`/ui`) — a
 relative one would land under the page's `<base>`.
+
+Upgrades go through odio-api (≥ the release whose run follows the unit
+whoever started it), at `--odio-api`, `http://127.0.0.1:8018` by default:
+"Apply now" is its `POST /upgrade/start`, and the Upgrade card is its run,
+followed from startup on its `GET /events` (from `GET /upgrade` on each
+connection) — running with the percent and step odios' progress callback
+streams to it, then done or failed, with systemd's exit code when it still
+has it. When odio-api does not answer, the card says so and offers no
+Apply button; `ssh` + `sudo odioctl upgrade apply` stays the way round.
 
 #### Behind odio-api
 
