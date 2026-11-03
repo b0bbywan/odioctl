@@ -107,8 +107,10 @@ type dacView struct {
 type upgradeView struct {
 	Checked   bool // a check has run (upgrades.json exists)
 	Available bool
-	Running   bool       // odio-upgrade.service is being followed: no Apply button
-	Note      actionNote // how the last run ended, empty when none was seen
+	Known     bool              // odio-api answers: without it no run is known, none started
+	Running   bool              // odio-upgrade.service runs: no Apply button
+	Progress  *upgrade.Progress // how far, while Running, once odio-api has said
+	Note      actionNote        // how the last run ended, empty when none was seen
 	UpToDate  string
 	Token     string
 	Items     []string
@@ -286,8 +288,8 @@ func dacViewOf(app *App, d dac.Status) dacView {
 }
 
 func upgradeViewOf(app *App, report *upgrade.Report) upgradeView {
-	running, note := app.upgrades.State(report)
-	view := upgradeView{Running: running, Note: note}
+	run := app.upgrades.State()
+	view := upgradeView{Known: run.Known, Running: run.Running, Progress: run.Progress, Note: run.Note}
 	if report == nil {
 		return view
 	}

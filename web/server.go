@@ -363,7 +363,11 @@ func RunServe(stdout, stderr io.Writer, cfg Config) int {
 	for _, ln := range lns {
 		fmt.Fprintf(stdout, "Serving odioctl web UI on %s%s\n", describe(ln), source)
 	}
-	return serveUntilSignal(stderr, lns, NewHandler(NewApp(cfg, Runners{Log: stderr})))
+	app := NewApp(cfg, Runners{Log: stderr})
+	ctx, stop := context.WithCancel(context.Background())
+	defer stop()
+	go app.Follow(ctx)
+	return serveUntilSignal(stderr, lns, NewHandler(app))
 }
 
 var errNoSockets = errors.New("--systemd-only, but systemd passed no socket: " +

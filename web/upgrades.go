@@ -1,9 +1,12 @@
 package web
 
-// The upgrade card's side of odio-upgrade.service: one watcher at a time, and
-// how the last run ended. Only Start ever starts the unit; a render observes.
+// The upgrade card's side of odio-upgrade.service, which odio-api starts and
+// tracks: its run, followed for the life of the process, and how the last
+// one ended. Only Start ever asks for a run; a render observes.
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"log"
 	"sync"
@@ -13,99 +16,119 @@ import (
 )
 
 type Upgrades struct {
-	mu       sync.Mutex
-	watching bool
-	note     actionNote // how the last run seen ended
-	unitsDir string
-	log      *log.Logger
-	notify   func(names ...string)
+	mu      sync.Mutex
+	run     upgrade.Run // odio-api's, unknown until it is heard
+	last    string      // the last state heard, kept through an outage
+	note    actionNote  // how the last run seen ended
+	odioAPI string      // "" → none: no run is known, none is started
+	log     *log.Logger
+	notify  func(names ...string)
 }
 
-func newUpgrades(unitsDir string, log *log.Logger, notify func(...string)) *Upgrades {
-	return &Upgrades{unitsDir: unitsDir, log: log, notify: notify}
+func newUpgrades(odioAPI string, log *log.Logger, notify func(...string)) *Upgrades {
+	return &Upgrades{odioAPI: odioAPI, log: log, notify: notify}
 }
 
-// Start starts the unit (= `sudo odioctl upgrade apply --progress`) and
-// watches it. A refusal inside the unit (sudoers) fails it within a
-// second, and the watcher reports that like any other end.
+// follow keeps the run odio-api's until ctx is done.
+func (u *Upgrades) follow(ctx context.Context) {
+	if u.odioAPI == "" {
+		return
+	}
+	upgrade.FollowRun(ctx, u.odioAPI, u.set, u.log.Printf)
+}
+
+// set takes the run odio-api reports and tells the open pages. A run's end
+// is its note, and the rows it installed. Called by follow alone.
+func (u *Upgrades) set(r upgrade.Run) {
+	u.mu.Lock()
+	same, last := u.run.Equal(r), u.last
+	u.mu.Unlock()
+	if same {
+		return
+	}
+	names := []string{"upgrade"}
+	var note *actionNote
+	switch {
+	case r.Running():
+		note = &actionNote{}
+	case r.State == upgrade.RunIdle && last == upgrade.RunRunning:
+		note = &actionNote{Text: "Done."}
+	case r.State == upgrade.RunFailed && last != upgrade.RunFailed:
+		n := failureNote(u.log)
+		note = &n
+	}
+	if last == upgrade.RunRunning && r.Known() && !r.Running() {
+		names = append(names, "components") // the run installs rows
+	}
+	if r.State != last && r.Known() {
+		u.log.Printf("upgrade: odio-api says the run is %s", r.State)
+	}
+	u.mu.Lock()
+	u.run = r
+	if r.Known() {
+		u.last = r.State
+	}
+	if note != nil {
+		u.note = *note
+	}
+	u.mu.Unlock()
+	u.notify(names...)
+}
+
+// failureNote is how the unit failed, as systemd still has it; after a
+// reboot only that it did.
+func failureNote(log *log.Logger) actionNote {
+	s, err := upgrade.ShowUnit()
+	if err != nil {
+		log.Printf("upgrade: %v", err)
+	}
+	if err != nil || !s.Failed() {
+		return actionNote{Text: "Failed.", Failed: true}
+	}
+	return actionNote{Text: fmt.Sprintf("Failed (%s, exit %d).", s.Result, s.Code), Failed: true}
+}
+
+// Start asks odio-api for a run (= `sudo odioctl upgrade apply --progress`).
+// A refusal inside the unit (sudoers) fails it within a second, and the
+// run says so like any other end.
 func (u *Upgrades) Start(report *upgrade.Report) (string, error) {
 	if report == nil || !report.UpgradeAvailable {
 		return "", userErrorf("nothing to apply — no upgrade or pending component reported")
 	}
-	if u.running() {
+	run := u.State()
+	switch {
+	case !run.Known:
+		return "", userErrorf("odio-api is not answering: upgrades run through it")
+	case run.Running:
 		return "Upgrade already running.", nil
 	}
-	if err := upgrade.StartUnit(); err != nil {
-		return "", userErrorf("cannot start %s: %v", upgrade.Unit, err)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	err := upgrade.StartRun(ctx, u.odioAPI)
+	switch {
+	case errors.Is(err, upgrade.ErrRunning):
+		return "Upgrade already running.", nil
+	case err != nil:
+		return "", userErrorf("cannot start the upgrade: %v", err)
 	}
-	u.log.Printf("upgrade: started %s", upgrade.Unit)
-	u.watch()
-	u.notify("upgrade")
+	u.log.Printf("upgrade: odio-api started %s", upgrade.Unit)
 	return "Upgrade started.", nil
 }
 
-func (u *Upgrades) running() bool {
+// upgradeRun is the card's view of the run: unknown without odio-api,
+// running (with its progress, once it came), or the note of the last one.
+type upgradeRun struct {
+	Known    bool
+	Running  bool
+	Progress *upgrade.Progress
+	Note     actionNote
+}
+
+func (u *Upgrades) State() upgradeRun {
 	u.mu.Lock()
 	defer u.mu.Unlock()
-	return u.watching
-}
-
-// unitNote is the end of a run, as the card shows it; a unit never run or
-// run to success reads the same (inactive, success).
-func unitNote(s upgrade.UnitState) actionNote {
-	if s.Failed() {
-		return actionNote{Text: fmt.Sprintf("Failed (%s, exit %d).", s.Result, s.Code), Failed: true}
+	if u.run.Running() {
+		return upgradeRun{Known: true, Running: true, Progress: u.run.Progress}
 	}
-	return actionNote{Text: "Done."}
-}
-
-// watch follows the unit to its end, then keeps that as the note and tells
-// the open pages. One watcher at a time.
-func (u *Upgrades) watch() {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-	if u.watching {
-		return
-	}
-	u.watching = true
-	u.note = actionNote{}
-	started := time.Now()
-	wait := upgrade.WatchUnit(u.unitsDir, u.log.Printf) // subscribed before we let go
-	go func() {
-		s := wait()
-		note := unitNote(s)
-		u.log.Printf("upgrade: %s %s after %s (%s)", upgrade.Unit, s.Active, time.Since(started).Round(time.Second), note.Text)
-		u.mu.Lock()
-		u.watching, u.note = false, note
-		u.mu.Unlock()
-		u.notify("upgrade", "components") // the run installs rows
-	}()
-}
-
-// State is (running, note of the last run). With no watcher of its own it
-// asks systemd: a unit activating (odio-api's, or ours from before a restart)
-// gets watched from here, one failed is shown as such.
-func (u *Upgrades) State(report *upgrade.Report) (running bool, note actionNote) {
-	u.mu.Lock()
-	watching, note := u.watching, u.note
-	u.mu.Unlock()
-	if watching {
-		return true, actionNote{}
-	}
-	if report == nil || !report.UpgradeAvailable {
-		return false, note
-	}
-	s, err := upgrade.ShowUnit()
-	switch {
-	case err != nil:
-		u.log.Printf("upgrade: %v", err)
-		return false, note
-	case s.Running():
-		u.log.Printf("upgrade: %s is activating, watching it", upgrade.Unit)
-		u.watch()
-		return true, actionNote{}
-	case s.Failed():
-		return false, unitNote(s)
-	}
-	return false, note
+	return upgradeRun{Known: u.run.Known(), Note: u.note}
 }

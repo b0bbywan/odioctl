@@ -1,7 +1,9 @@
 <section id="upgrade" sse-swap="upgrade" hx-swap="outerHTML">
 <h2>Upgrade</h2>
 {{if .Running}}<button class="primary" type="button" disabled>Upgrading…</button>
+{{with .Progress}}<div class="progress"><progress max="100" value="{{.Percent}}">{{.Percent}}%</progress><span class="hint">{{.Percent}}%{{with .Step}} · {{.}}{{end}}</span></div>{{end}}
 {{else if not .Checked}}<div class="banner warn">No upgrade check yet.</div>{{else if not .Available}}<p class="hint">{{.UpToDate}}</p>{{else}}
 <ul class="pending">{{range .Items}}<li>{{.}}</li>{{end}}</ul>
-<form hx-post="upgrade" hx-target="#notice" hx-swap="innerHTML"><input type="hidden" name="token" value="{{.Token}}"><button class="primary" type="submit">Apply now</button></form>
-{{end}}{{if .Note.Text}}<p class="hint outcome{{if .Note.Failed}} err{{end}}">Upgrade: {{.Note.Text}}</p>{{end}}</section>
+{{if .Known}}<form hx-post="upgrade" hx-target="#notice" hx-swap="innerHTML"><input type="hidden" name="token" value="{{.Token}}"><button class="primary" type="submit">Apply now</button></form>
+{{else}}<p class="hint">Upgrades run through odio-api, which is not answering.</p>
+{{end}}{{end}}{{if .Note.Text}}<p class="hint outcome{{if .Note.Failed}} err{{end}}">Upgrade: {{.Note.Text}}</p>{{end}}</section>
