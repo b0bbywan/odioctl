@@ -27,7 +27,6 @@ type Config struct {
 	Port         int
 	Socket       string // a Unix socket to serve on too, for a reverse proxy; "" → none
 	SystemdOnly  bool   // serve only the sockets systemd passes, never bind: the units' mode
-	UIURL        string // where the logo leads; "" → odio-api on the host the browser used
 	StatePath    string
 	ConfigTxt    string // "" → dac.ConfigTxt
 	OdioctlBin   string
@@ -54,7 +53,6 @@ func DefaultConfig() Config {
 	return Config{
 		Bind:       "0.0.0.0",
 		Port:       DefaultPort,
-		UIURL:      os.Getenv("ODIOCTL_UI_URL"),
 		StatePath:  state.SystemStatePath,
 		OdioctlBin: bin,
 		Home:       home,

@@ -278,9 +278,10 @@ func (h *handler) readForm(r *http.Request) (url.Values, error) {
 // reverse proxy on the Unix socket — the only door whose X-Forwarded-* is
 // believed, since only the target user can connect to it.
 type origin struct {
-	Host   string // the hostname, no port: the odio-ui link, an action's {host}
-	Base   string // the page's <base href>, "/" unless proxied under a prefix
-	Remote string // who, for the log
+	Host    string // the hostname, no port: the odio-ui link, an action's {host}
+	Base    string // the page's <base href>, "/" unless proxied under a prefix
+	Remote  string // who, for the log
+	Proxied bool   // through odio-api's reverse proxy: the page is on its origin
 }
 
 type viaProxyKey struct{}
@@ -299,7 +300,7 @@ func originOf(r *http.Request) origin {
 	if proxied, _ := r.Context().Value(viaProxyKey{}).(bool); !proxied {
 		return o
 	}
-	o.Remote = "proxy"
+	o.Remote, o.Proxied = "proxy", true
 	if h := lastValue(r.Header.Get("X-Forwarded-Host")); h != "" {
 		o.Host = hostOf(h)
 	}

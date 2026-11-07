@@ -104,7 +104,8 @@ func newFixture(t *testing.T) *fixture {
 	if err := os.MkdirAll(filepath.Join(f.dir, "run", "systemd", "units"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	cfg := Config{StatePath: f.statePath, ConfigTxt: f.configPath, Home: f.dir, RuntimeDir: filepath.Join(f.dir, "run")}
+	cfg := Config{StatePath: f.statePath, ConfigTxt: f.configPath, Home: f.dir, RuntimeDir: filepath.Join(f.dir, "run"),
+		OdioAPI: "http://127.0.0.1:8018"}
 	f.app = NewApp(cfg, Runners{
 		// Stand-in for `sudo -n odioctl dac …`: the same code path, in-process.
 		Privileged: func(args []string) (RunResult, error) {
@@ -1109,18 +1110,24 @@ func TestHostHeaderDrivesTheOdioUILink(t *testing.T) {
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
-	wants(t, string(body), "http://odio.local:8018/ui", `<base href="/">`)
+	wants(t, string(body), f.uiOnPort("odio.local"), `<base href="/">`)
 }
 
-func TestConfiguredUIURLWinsOverTheGuess(t *testing.T) {
+// uiOnPort is the odio-ui link on the port: host, at the fake odio-api's port.
+func (f *fixture) uiOnPort(host string) string {
+	api, _ := url.Parse(f.app.Config().OdioAPI)
+	return fmt.Sprintf(`href="http://%s:%s/ui"`, host, api.Port())
+}
+
+func TestNoOdioAPINoUILink(t *testing.T) {
 	f := newFixture(t)
 	cfg := f.app.Config()
-	cfg.UIURL = "https://odio.example/ui"
+	cfg.OdioAPI = ""
 	f.app.cfg = cfg
 	_, body := f.get("/")
-	wants(t, body, `href="https://odio.example/ui"`)
-	if strings.Contains(body, ":8018/ui") {
-		t.Error("the port guess is still in the page")
+	wants(t, body, `<img src="static/logo.png" alt="odio logo">`)
+	if strings.Contains(body, `title="odio player"`) {
+		t.Error("the logo leads somewhere with no odio-api")
 	}
 }
 
@@ -1134,6 +1141,25 @@ func TestHostOf(t *testing.T) {
 	} {
 		if got := hostOf(in); got != want {
 			t.Errorf("hostOf(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestUILink(t *testing.T) {
+	for _, c := range []struct {
+		o         origin
+		api, want string
+	}{
+		{origin{Host: "odio.local"}, "http://127.0.0.1:8018", "http://odio.local:8018/ui"},
+		{origin{Host: hostOf("[fe80::1]:8021")}, "http://127.0.0.1:8018", "http://[fe80::1]:8018/ui"},
+		{origin{}, "http://127.0.0.1:9000", "http://self:9000/ui"}, // no Host header: the hostname
+		{origin{Host: "odio.local"}, "http://localhost", "http://odio.local/ui"},
+		{origin{Host: "odio.local", Proxied: true}, "http://127.0.0.1:8018", "/ui"},
+		{origin{Host: "odio.local"}, "", ""},
+		{origin{Host: "odio.local"}, "not a url", ""},
+	} {
+		if got := uiLink(c.o, c.api, "self"); got != c.want {
+			t.Errorf("uiLink(%+v, %q) = %q, want %q", c.o, c.api, got, c.want)
 		}
 	}
 }
@@ -1161,8 +1187,8 @@ func TestProxiedPageLivesUnderThePrefix(t *testing.T) {
 	req.Header.Set("X-Forwarded-Prefix", "/admin")
 	req.Header.Set("X-Forwarded-Host", "odio.local:8018")
 	body := f.viaProxy(req)
-	// the odio-ui link is built as on the port, from the forwarded host
-	wants(t, body, `<base href="/admin/">`, "http://odio.local:8018/ui", `sse-connect="events"`)
+	// the page is odio-api's own: odio-ui is on its origin
+	wants(t, body, `<base href="/admin/">`, `href="/ui"`, `sse-connect="events"`)
 }
 
 func TestForwardedHeadersAreIgnoredOnThePort(t *testing.T) {
@@ -1177,7 +1203,7 @@ func TestForwardedHeadersAreIgnoredOnThePort(t *testing.T) {
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
-	wants(t, string(body), `<base href="/">`, "http://odio.local:8018/ui")
+	wants(t, string(body), `<base href="/">`, f.uiOnPort("odio.local"))
 }
 
 func TestProxiedActionCallsBackToTheForwardedHost(t *testing.T) {
