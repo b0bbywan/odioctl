@@ -6,9 +6,8 @@ since rewritten in Go.
 
 ## Rules of the house
 
-- **Go, stdlib plus fsnotify.** `go.mod` requires `github.com/fsnotify/fsnotify`
-  (the units-directory watch below, the same one odio-api uses) and nothing
-  else; a new dependency is a decision, not a convenience. The package ships
+- **Go, stdlib only.** `go.mod` requires nothing (hence no `go.sum`); a
+  dependency is a decision, not a convenience. The package ships
   as per-arch `.deb`s on apt.odio.love for a Raspberry Pi appliance (armhf is
   GOARM=6 so one binary runs from the Zero up). Subprocesses (`curl | bash`,
   `sudo -n`, `systemctl --user`) stay exec'd.
@@ -36,8 +35,9 @@ since rewritten in Go.
   hook. It never fails (exit 0): what is missing is left out.
 - **Test seams are explicit**: swappable package vars (`manifest.Fetch`,
   `upgrade.runInstall`, `upgrade.runDisable`, `upgrade.fetchRelease`,
-  `upgrade.Systemctl`, `dac.RebootFlag`) and injected
-  funcs (`web.Runners`).
+  `upgrade.RunRetry`/`RunStale`/`RunRetryMax`, `dac.RebootFlag`) and injected
+  funcs (`web.Runners`). odio-api is a peer, not a seam: tests point
+  `Config.OdioAPI` at an `httptest` fake of it.
   Tests live in the package they test and swap the seam with `t.Cleanup`;
   never reach around a seam to mock deeper.
 - **The `cli` package only parses argv.** Command behavior lives in the owning
@@ -78,22 +78,33 @@ since rewritten in Go.
   logind takes the request, the connection with it, so the notice must be
   on the wire first; a refusal shows on the banners through the stream
   (`App.RebootError`). Upgrades are never run by the
-  web process: "Apply now" does `systemctl --user start --no-block
-  odio-upgrade.service` (the unit odio-api drives too) and that token-checked
-  POST is the only place the unit is ever started — a render observes. What
-  the card shows comes from systemd, not from a held child. The unit is the
-  `upgrade` package's (`upgrade/unit.go`): `StartUnit`, `ShowUnit` (by key:
-  `show` prints properties in systemd's order, never the `-p` one) and
-  `WatchUnit`/`WaitUnit` (subscribed before returning, so a waiter cannot
-  miss the end), which watches `$XDG_RUNTIME_DIR/systemd/units` (fsnotify,
-  `Config.RuntimeDir`) for the `invocation:odio-upgrade.service` link
-  systemd removes as the oneshot leaves `activating`, then asks `show` how
-  it ended; a slow tick backs the events, and without the directory the
-  unit is polled. No probe right after `start --no-block`: it returns
-  before the unit is activating. `web` keeps only the policy: one watcher
-  at a time, `Result`/`ExecMainStatus` as the card's note, a unit found
-  `activating` at render time (odio-api started it, or the web restarted
-  under it) gets a watcher, one found `failed` is shown as such.
+  web process, nor started or watched by it: odio-api owns the run
+  (`upgrade/odioapi.go`). "Apply now" is `POST /upgrade/start` to odio-api
+  (`upgrade.StartRun`, its 409 being "already running"), and that
+  token-checked POST is the only place a run is ever asked for — a render
+  observes. odio-api tracks `odio-upgrade.service` whoever started it (its
+  own button, a shell) and relays the progress odios' `odio_progress`
+  callback streams to its socket; `odioctl web` subscribes once, from
+  startup (`App.Follow`), to its `/events?types=upgrade.info,upgrade.progress`
+  on lo (`Config.OdioAPI`, never through the browser: the card stays our
+  markup, port 8021 too), each connection starting from `GET /upgrade`'s
+  run (`upgrade.FollowRun`), and only once `GET /server` says the upgrade
+  backend is on (`backends.upgrade`; off, nothing is subscribed to and the
+  card says so). It reconnects across odio-api's own restart
+  (an upgrade of it, mid-run) keeping the run as it was, and only after
+  `RunStale` calls it unknown, at once while it never answered (no run to
+  keep): no Apply button then, nothing says whether one is on. Before that
+  first word the card says "Reaching odio-api…", not that it is not
+  answering. Retries are `RunRetry` while an outage is young, then double
+  up to `RunRetryMax` (from the first one when the backend is off: only a
+  restart of odio-api changes it). Mid-run, odio-api's keepalive (sent
+  after 30s without an event) re-reads `GET /upgrade`: a missed end cannot
+  pin the card. `web` keeps the policy: a run leaving `running` is its end
+  (note, and the `components` rows it installed), even when an outage
+  hid it; a `failed` one says what failed when its playbook's `end` line
+  did (odios' `odio_progress`: the step and the first failed task, relayed
+  as `upgrade.progress`, before a unit's end or after a shell's), "Failed."
+  without one — never asked of systemd, which may hold another run's.
   The playbook's last step re-runs `check`, so upgrades.json settles by itself.
 - **Two groups, on purpose.** `odio` is odios' state group (read/write on
   `/var/lib/odio`), and odios puts the installing user in it too. `odioctl` is
@@ -159,7 +170,7 @@ since rewritten in Go.
   pointing `check` at a pre-release — `--version pr-84` or
   `ODIOCTL_ODIOS_VERSION` (`/etc/default/odioctl`, wired into both `--user`
   units: the web process refreshes upgrades.json on every toggle). Never add a
-  *URL* override reachable from the environment — the tag is interpolated into
+  *release* URL override reachable from the environment — the tag is interpolated into
   a `b0bbywan/odios` release path, which is what keeps a rogue value to picking
   another odios release instead of a manifest of its own; `manifest.IsReleaseTag`
   is that boundary and `apply` re-checks it, because upgrades.json is
@@ -193,7 +204,10 @@ since rewritten in Go.
   accent) so both pages on odio feel like one product — keep it in sync,
   no Tailwind. No redirects, no query-string state. Every URL in the
   templates is relative to the page's `<base href>` (never `/…`): odio-api
-  serves the page under `/ui/admin/`. `X-Forwarded-Prefix`/`-Host`/`-For` are
+  serves the page under `/ui/admin/`. The one exception is the logo's link
+  to odio-ui, derived from odio-api (`web.uiLink`): `/ui` on its origin
+  through the proxy, else the browser's host at `Config.OdioAPI`'s port.
+  `X-Forwarded-Prefix`/`-Host`/`-For` are
   believed on the Unix socket only (`web.originOf`, tagged per connection by
   `markProxied`), never on port 8021, where the page stays as it was.
 - **`components.Action` = a command odio runs for the user**, so nobody
