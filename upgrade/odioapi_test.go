@@ -129,6 +129,8 @@ func follow(t *testing.T, base string, rec *recorder, logf func(string, ...any))
 
 func pct(percent int, step string) *Progress { return &Progress{Percent: percent, Step: step} }
 
+func quiet(string, ...any) {}
+
 func wantRuns(t *testing.T, got []Run, want ...Run) {
 	t.Helper()
 	for i, w := range want {
