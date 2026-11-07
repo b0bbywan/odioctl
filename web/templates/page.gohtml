@@ -15,7 +15,7 @@
 <header>
   <div class="wrap">
     <div class="brand">
-      <a href="{{.UIURL}}" title="odio player"><img src="static/logo.png" alt="odio logo"></a>
+      {{if .UIURL}}<a href="{{.UIURL}}" title="odio player"><img src="static/logo.png" alt="odio logo"></a>{{else}}<img src="static/logo.png" alt="odio logo">{{end}}
       <div>
         <h1>Settings</h1>
         <p>{{.Hostname}}</p>

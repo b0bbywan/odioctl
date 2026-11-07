@@ -9,8 +9,8 @@ import (
 	"fmt"
 	"html/template"
 	"net"
+	"net/url"
 	"os"
-	"strconv"
 	"strings"
 
 	"github.com/b0bbywan/odioctl/components"
@@ -439,25 +439,39 @@ func stateOf(app *App) (*state.State, string) {
 	return &s, ""
 }
 
+// uiLink is odio-ui, odio-api's dashboard, where the logo leads. Through the
+// proxy the page is odio-api's own: /ui on its origin. On the port, odio-api
+// at its own port on the name the browser used (it reaches odio), the
+// hostname without one. "" without odio-api: the logo leads nowhere.
+func uiLink(o origin, odioAPI, hostname string) string {
+	if odioAPI == "" {
+		return ""
+	}
+	if o.Proxied {
+		return "/ui"
+	}
+	api, err := url.Parse(odioAPI)
+	if err != nil || api.Host == "" {
+		return ""
+	}
+	host := o.Host
+	if host == "" {
+		host = hostname
+	}
+	if port := api.Port(); port != "" {
+		host = net.JoinHostPort(host, port)
+	}
+	return (&url.URL{Scheme: api.Scheme, Host: host, Path: "/ui"}).String()
+}
+
 // RenderPage is GET /: the sections as they stand, an empty #notice and
 // #modal for the POSTs to fill, every URL relative to the <base> o sets.
 func RenderPage(app *App, o origin) (string, error) {
-	// The Host header when the browser gave one (that name reaches odio), its
-	// own hostname otherwise — same address for the odio-ui link and ssh.
-	hostname := o.Host
-	if hostname == "" {
-		hostname, _ = os.Hostname()
-	}
-	uiURL := app.Config().UIURL
-	if uiURL == "" {
-		uiURL = fmt.Sprintf("http://%s/ui", net.JoinHostPort(hostname, strconv.Itoa(OdioAPIPort)))
-	}
 	selfName, _ := os.Hostname()
-
 	view := pageView{
 		Version:  config.AppVersion,
 		Base:     o.Base,
-		UIURL:    uiURL,
+		UIURL:    uiLink(o, app.Config().OdioAPI, selfName),
 		Hostname: selfName,
 	}
 	if st, _ := stateOf(app); st != nil {

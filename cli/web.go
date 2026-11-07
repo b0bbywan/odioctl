@@ -17,16 +17,14 @@ func runWeb(stdout, stderr io.Writer, args []string) int {
 		"(ignored when systemd passes the sockets)")
 	fs.BoolVar(&cfg.SystemdOnly, "systemd-only", false, "serve only the sockets systemd passes, "+
 		"exit 2 rather than bind when there are none")
-	fs.StringVar(&cfg.UIURL, "ui-url", cfg.UIURL, "where the logo leads, absolute or from the root "+
-		"(default: $ODIOCTL_UI_URL, else http://<host>:8018/ui)")
 	fs.StringVar(&cfg.StatePath, "state", state.SystemStatePath, "path to state.json")
 	fs.StringVar(&cfg.ConfigTxt, "config", "", "path to config.txt (default: "+dac.ConfigTxt+"). "+
 		"Dev/test only: the sudoers rule does not admit --config, so DAC changes "+
 		"through sudo will be refused")
 	fs.StringVar(&cfg.UpgradesPath, "upgrades", "", "path to upgrades.json "+
 		"(default: "+state.SystemUpgradesPath+", or next to a custom --state)")
-	fs.StringVar(&cfg.OdioAPI, "odio-api", cfg.OdioAPI, "odio-api's base URL ($"+web.OdioAPIEnv+
-		" when set; \"\" for none)")
+	fs.StringVar(&cfg.OdioAPI, "odio-api", cfg.OdioAPI, "odio-api's base URL: the logo leads to its dashboard ($"+
+		web.OdioAPIEnv+" when set; \"\" for none)")
 	if code, done := parse(fs, args); done {
 		return code
 	}
