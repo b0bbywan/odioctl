@@ -2,8 +2,11 @@ package web
 
 import (
 	"bufio"
+	"context"
+	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -41,7 +44,7 @@ type fixture struct {
 	spawns     [][]string
 	script     string
 	logs       syncBuf
-	unit       *fakeUnit // set by useUnit
+	api        *fakeOdioAPI
 }
 
 // syncBuf collects the log: the exit line comes from a goroutine.
@@ -63,6 +66,13 @@ func (s *syncBuf) String() string {
 }
 
 func newFixture(t *testing.T) *fixture {
+	t.Helper()
+	return newFixtureWith(t, `{"state":"idle"}`)
+}
+
+// newFixtureWith starts odio-api's run as run (GET /upgrade's JSON); "" is
+// no odio-api configured at all.
+func newFixtureWith(t *testing.T, run string) *fixture {
 	t.Helper()
 	f := &fixture{t: t, dir: t.TempDir(), userRan: make(chan []string, 16)}
 	f.statePath = filepath.Join(f.dir, "state.json")
@@ -100,12 +110,17 @@ func newFixture(t *testing.T) *fixture {
 	upgrade.Refresh(upgrade.CheckOptions{State: f.statePath, Output: state.UpgradesPathFor(f.statePath)})
 
 	f.script = "echo 'paste this URL:'; echo '  https://qobuz.test/oauth?id=1'; sleep 30"
-	// the user manager's runtime dir, where a fakeUnit leaves its invocation link
-	if err := os.MkdirAll(filepath.Join(f.dir, "run", "systemd", "units"), 0o755); err != nil {
-		t.Fatal(err)
+	// odio-api outlives the follower, whose stop is registered after it
+	f.api = newFakeOdioAPI(run)
+	api := httptest.NewServer(f.api)
+	t.Cleanup(api.Close)
+	oldRetry, oldStale, oldMax := upgrade.RunRetry, upgrade.RunStale, upgrade.RunRetryMax
+	upgrade.RunRetry, upgrade.RunStale, upgrade.RunRetryMax = 10*time.Millisecond, 100*time.Millisecond, 40*time.Millisecond
+	t.Cleanup(func() { upgrade.RunRetry, upgrade.RunStale, upgrade.RunRetryMax = oldRetry, oldStale, oldMax })
+	cfg := Config{StatePath: f.statePath, ConfigTxt: f.configPath, Home: f.dir, OdioAPI: api.URL}
+	if run == "" {
+		cfg.OdioAPI = ""
 	}
-	cfg := Config{StatePath: f.statePath, ConfigTxt: f.configPath, Home: f.dir, RuntimeDir: filepath.Join(f.dir, "run"),
-		OdioAPI: "http://127.0.0.1:8018"}
 	f.app = NewApp(cfg, Runners{
 		// Stand-in for `sudo -n odioctl dac …`: the same code path, in-process.
 		Privileged: func(args []string) (RunResult, error) {
@@ -132,6 +147,21 @@ func newFixture(t *testing.T) *fixture {
 	f.srv.Start()
 	t.Cleanup(f.srv.Close)
 	t.Cleanup(f.stopRuns)
+	ctx, stop := context.WithCancel(context.Background())
+	followed := make(chan struct{})
+	go func() {
+		f.app.Follow(ctx)
+		close(followed)
+	}()
+	t.Cleanup(func() {
+		stop()
+		<-followed
+	})
+	var want struct {
+		State string `json:"state"`
+	}
+	_ = json.Unmarshal([]byte(run), &want)
+	f.waitRun(want.State)
 	return f
 }
 
@@ -736,122 +766,166 @@ func (f *fixture) makeUpgradePending() {
 	f.post("/components", url.Values{"kind": {"role"}, "name": {"qbzd"}, "enabled": {"1"}}, true)
 }
 
-// fakeUnit stands in for systemd's view of odio-upgrade.service behind
-// upgrade.Systemctl, invocation link included, in systemd's property order.
-// Guarded: the watcher asks from its own goroutine.
-type fakeUnit struct {
-	mu     sync.Mutex
-	active string // activating, inactive, failed
-	result string
-	code   int
-	link   string
-	calls  []string // every systemctl --user argv, joined
+// fakeOdioAPI is odio-api's upgrade backend as odioctl sees it: GET
+// /upgrade's run, /events carrying what the test pushes, POST /upgrade/start
+// starting a run unless one is running.
+type fakeOdioAPI struct {
+	mu      sync.Mutex
+	run     string // JSON
+	down    bool
+	noStart bool // can_upgrade false: no upgrade unit
+	off     bool // GET /server: no upgrade backend
+	starts  int
+	streams map[chan string]struct{}
 }
 
-func (u *fakeUnit) set(active, result string, code int) {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-	u.active, u.result, u.code = active, result, code
-	u.exportLink()
+func newFakeOdioAPI(run string) *fakeOdioAPI {
+	return &fakeOdioAPI{run: run, streams: map[chan string]struct{}{}}
 }
 
-// exportLink is systemd's invocation link: there while activating, gone
-// after — removed once the state is, so a `show` on the event sees the end.
-func (u *fakeUnit) exportLink() {
-	if u.link == "" {
+func (a *fakeOdioAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	a.mu.Lock()
+	if a.down {
+		a.mu.Unlock()
+		http.Error(w, "down", http.StatusServiceUnavailable)
 		return
 	}
-	if u.active == "activating" {
-		_ = os.Symlink("0123456789abcdef", u.link)
-	} else {
-		_ = os.Remove(u.link)
-	}
-}
-
-// useUnit puts u behind upgrade.Systemctl. The tick behind inotify is
-// pushed far off: only the link's removal may end the watcher within
-// waitWatcherGone's patience; the poll stays quick for the no-directory case.
-func (f *fixture) useUnit(u *fakeUnit) {
-	f.unit = u
-	u.mu.Lock()
-	u.link = filepath.Join(f.app.upgrades.unitsDir, "invocation:"+upgrade.Unit)
-	u.exportLink()
-	u.mu.Unlock()
-	oldSystemctl := upgrade.Systemctl
-	upgrade.Systemctl = func(args ...string) (string, error) {
-		u.mu.Lock()
-		defer u.mu.Unlock()
-		u.calls = append(u.calls, strings.Join(args, " "))
-		switch args[0] {
-		case "show":
-			return fmt.Sprintf("Result=%s\nExecMainStatus=%d\nActiveState=%s\n", u.result, u.code, u.active), nil
-		case "start":
-			u.active = "activating"
-			u.exportLink()
+	switch r.Method + " " + r.URL.Path {
+	case "GET /server":
+		on := !a.off
+		a.mu.Unlock()
+		fmt.Fprintf(w, `{"hostname":"odio","backends":{"upgrade":%t}}`, on)
+	case "GET /upgrade":
+		run, canStart := a.run, !a.noStart
+		a.mu.Unlock()
+		fmt.Fprintf(w, `{"current":"2026.5.0","latest":"2026.5.0","upgrade_available":true,"can_upgrade":%t,"run":%s}`, canStart, run)
+	case "GET /events":
+		ch := make(chan string, 64)
+		a.streams[ch] = struct{}{}
+		a.mu.Unlock()
+		defer func() {
+			a.mu.Lock()
+			delete(a.streams, ch)
+			a.mu.Unlock()
+		}()
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "event: server.info\ndata: \"connected\"\n\n")
+		w.(http.Flusher).Flush()
+		for {
+			select {
+			case <-r.Context().Done():
+				return
+			case msg, ok := <-ch:
+				if !ok {
+					return
+				}
+				fmt.Fprint(w, msg)
+				w.(http.Flusher).Flush()
+			}
 		}
-		return "", nil
-	}
-	oldPoll, oldRecheck := upgrade.UnitPoll, upgrade.UnitRecheck
-	upgrade.UnitPoll, upgrade.UnitRecheck = 20*time.Millisecond, time.Hour
-	f.t.Cleanup(func() {
-		upgrade.Systemctl = oldSystemctl
-		upgrade.UnitPoll, upgrade.UnitRecheck = oldPoll, oldRecheck
-	})
-}
-
-// starts is every `systemctl --user start …` the unit saw.
-func (f *fixture) starts() (out []string) {
-	f.unit.mu.Lock()
-	defer f.unit.mu.Unlock()
-	for _, call := range f.unit.calls {
-		if strings.HasPrefix(call, "start ") {
-			out = append(out, call)
+	case "POST /upgrade/start":
+		if strings.Contains(a.run, `"running"`) {
+			a.mu.Unlock()
+			http.Error(w, "upgrade: already in progress", http.StatusConflict)
+			return
 		}
+		a.starts++
+		a.mu.Unlock()
+		a.setRun(`{"state":"running","origin":"systemd"}`)
+		w.WriteHeader(http.StatusAccepted)
+	default:
+		a.mu.Unlock()
+		http.NotFound(w, r)
 	}
-	return out
 }
 
-func (f *fixture) waitWatcherGone() bool {
+func (a *fakeOdioAPI) push(event, data string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for ch := range a.streams {
+		ch <- fmt.Sprintf("event: %s\ndata: %s\n\n", event, data)
+	}
+}
+
+func (a *fakeOdioAPI) setRun(run string) {
+	a.mu.Lock()
+	a.run = run
+	a.mu.Unlock()
+	a.push("upgrade.info", run)
+}
+
+func (a *fakeOdioAPI) progress(percent int, step string) {
+	a.push("upgrade.progress", fmt.Sprintf(`{"event":"progress","percent":%d,"current":3,"step":%q}`, percent, step))
+}
+
+// hangUp ends every stream, as odio-api restarting does; down, it stays away.
+func (a *fakeOdioAPI) hangUp(run string, down bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.run, a.down = run, down
+	for ch := range a.streams {
+		close(ch)
+		delete(a.streams, ch)
+	}
+}
+
+func (a *fakeOdioAPI) startCount() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.starts
+}
+
+// waitRun waits for the card to hold odio-api's run as state ("" unknown).
+func (f *fixture) waitRun(state string) {
+	f.t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		f.app.upgrades.mu.Lock()
-		watching := f.app.upgrades.watching
+		got := f.app.upgrades.run.State
 		f.app.upgrades.mu.Unlock()
-		if !watching {
-			return true
+		if got == state {
+			return
 		}
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(5 * time.Millisecond)
 	}
-	return false
+	f.t.Fatalf("the card never held a %q run", state)
 }
 
-func TestApplyNowStartsAndWatchesTheUserUnit(t *testing.T) {
+// waitUpgrades waits for the card's run to satisfy cond.
+func (f *fixture) waitUpgrades(what string, cond func(upgrade.Run) bool) {
+	f.t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for run, _, _ := f.app.upgrades.State(); !cond(run); run, _, _ = f.app.upgrades.State() {
+		if time.Now().After(deadline) {
+			f.t.Fatalf("the card never %s", what)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+func TestApplyNowStartsThroughOdioAPI(t *testing.T) {
 	f := newFixture(t)
 	f.makeUpgradePending()
-	unit := &fakeUnit{active: "inactive", result: "success"}
-	f.useUnit(unit)
 	// an action waiting for its link to be followed is not an upgrade
 	f.installQbzd()
 	f.post("/components/action", url.Values{"kind": {"role"}, "name": {"qbzd"}, "action": {"login"}}, true)
 	_, body := f.post("/upgrade", url.Values{}, true)
 	wants(t, body, "Upgrade started.")
+	f.waitRun(upgrade.RunRunning)
 	_, body = f.get("/")
 	wants(t, body, "Upgrading…", `<button class="primary" type="button" disabled>`)
-	if starts := f.starts(); len(starts) != 1 || starts[0] != "start --no-block odio-upgrade.service" {
-		t.Errorf("starts = %v", starts)
-	}
-	// a second click is not a second start
+	// a second click is not a second run
 	_, body = f.post("/upgrade", url.Values{}, true)
 	wants(t, body, "Upgrade already running.")
-	if len(f.starts()) != 1 || len(f.spawns) != 1 {
-		t.Errorf("starts = %v, spawns = %v", f.starts(), f.spawns)
+	if f.api.startCount() != 1 || len(f.spawns) != 1 {
+		t.Errorf("starts = %d, spawns = %v", f.api.startCount(), f.spawns)
 	}
-	// the unit ends having installed qbzd: the watcher notes it, the stream
-	// says so, the card and the row show it
+	// the run ends having installed qbzd: the stream says so, the card and
+	// the row show it
 	s := f.openStream()
 	wants(t, s.until("event: dac"), "Upgrading…")
 	f.installQbzd()
-	unit.set("inactive", "success", 0)
+	f.api.setRun(`{"state":"idle","origin":"systemd"}`)
 	batch := s.until("Qobuz Connect — installed, click to disable")
 	wants(t, batch, "event: upgrade\ndata: <section id=\"upgrade\"", "Upgrade: Done.", "Apply now",
 		"event: components\n", `<div id="row-role-qbzd" class="card">`)
@@ -861,74 +935,188 @@ func TestApplyNowStartsAndWatchesTheUserUnit(t *testing.T) {
 	if strings.Contains(batch, "event: dac\n") {
 		t.Error("an upgrade's end re-sent the DAC section")
 	}
-	if !f.waitWatcherGone() {
-		t.Fatal("watcher still running")
-	}
 	_, body = f.get("/")
 	wants(t, body, `<p class="hint outcome">Upgrade: Done.</p>`, "Apply now")
 	if strings.Contains(body, "Upgrading…") {
 		t.Error("page still shows the run after its end")
 	}
-	wants(t, f.logs.String(), "upgrade: started odio-upgrade.service", "odio-upgrade.service inactive after")
+	wants(t, f.logs.String(), "upgrade: odio-api started a run",
+		"upgrade: odio-api says the run is running", "upgrade: odio-api says the run is idle")
+}
+
+// A run started elsewhere (odio-api's own button, a shell) is the card's
+// too, with its progress; a render starts nothing.
+func TestUpgradeProgressFromOdioAPI(t *testing.T) {
+	f := newFixture(t)
+	f.makeUpgradePending()
+	s := f.openStream()
+	s.until("event: dac")
+	f.api.setRun(`{"state":"running","origin":"systemd"}`)
+	wants(t, s.until("Upgrading…"), "event: upgrade\n")
+	f.api.progress(42, "mpd")
+	batch := s.until("42% · mpd")
+	wants(t, batch, `<progress max="100" value="42">`)
+	if strings.Contains(batch, "event: components\n") {
+		t.Error("progress re-sent the components section")
+	}
+	_, body := f.get("/")
+	wants(t, body, `value="42"`, "42% · mpd")
+	if f.api.startCount() != 0 {
+		t.Error("a render started a run")
+	}
+	f.api.setRun(`{"state":"idle","origin":"systemd"}`)
+	wants(t, s.until("Upgrade: Done."), "Apply now")
+	_, body = f.get("/")
+	if strings.Contains(body, "<progress") {
+		t.Error("an ended run still shows its progress")
+	}
+}
+
+// odio-api restarting at the end of a run (its own upgrade) comes back with
+// the run over: that is the run's end all the same.
+func TestOdioAPIRestartEndsTheRun(t *testing.T) {
+	f := newFixtureWith(t, `{"state":"running","origin":"systemd","percent":80,"step":"odio_api"}`)
+	f.makeUpgradePending()
+	_, body := f.get("/")
+	wants(t, body, "80% · odio_api")
+	s := f.openStream()
+	s.until("event: dac")
+	f.api.hangUp(`{"state":"idle","origin":"systemd"}`, false)
+	batch := s.until("Upgrade: Done.")
+	wants(t, batch, "Apply now")
+	if !strings.Contains(batch, "event: components\n") {
+		wants(t, s.until("event: components"))
+	}
 }
 
 func TestUpgradeFailureIsTheNote(t *testing.T) {
 	f := newFixture(t)
 	f.makeUpgradePending()
-	unit := &fakeUnit{active: "inactive", result: "success"}
-	f.useUnit(unit)
 	f.post("/upgrade", url.Values{}, true)
-	unit.set("failed", "exit-code", 1) // sudoers said no, or the playbook died
-	if !f.waitWatcherGone() {
-		t.Fatal("watcher still running")
-	}
+	f.waitRun(upgrade.RunRunning)
+	f.api.push("upgrade.progress", `{"event":"end","success":false,"changed":0,"step":"mpd","error":"Install mpd: no package mpd"}`)
+	f.api.setRun(`{"state":"failed","origin":"systemd"}`)
+	f.waitRun(upgrade.RunFailed)
+	const note = `<p class="hint outcome err">Upgrade: Failed in mpd: Install mpd: no package mpd</p>`
 	_, body := f.get("/")
-	wants(t, body, `<p class="hint outcome err">Upgrade: Failed (exit-code, exit 1).</p>`, "Apply now")
-}
+	wants(t, body, note, "Apply now")
 
-func TestUpgradeStartedElsewhereIsWatchedNeverStarted(t *testing.T) {
-	f := newFixture(t)
-	f.makeUpgradePending()
-	// odio-api started the unit, or this process restarted under it
-	unit := &fakeUnit{active: "activating"}
-	f.useUnit(unit)
-	_, body := f.get("/")
-	wants(t, body, "Upgrading…")
-	f.get("/") // watched once, not probed again
-	if len(f.starts()) != 0 || len(f.spawns) != 0 {
-		t.Errorf("a render started something: starts = %v, spawns = %v", f.starts(), f.spawns)
-	}
-	wants(t, f.logs.String(), "odio-upgrade.service is activating, watching it")
-	unit.set("failed", "exit-code", 2)
-	if !f.waitWatcherGone() {
-		t.Fatal("watcher still running")
-	}
+	// odio-api restarting: its snapshot has no end line, the note stays
+	f.api.hangUp(`{"state":"failed","origin":"systemd"}`, false)
+	f.waitUpgrades("took the snapshot", func(r upgrade.Run) bool { return r.Known() && r.Failure == nil })
 	_, body = f.get("/")
-	wants(t, body, "Upgrade: Failed (exit-code, exit 2).")
-}
+	wants(t, body, note)
 
-func TestWithoutUnitsDirTheUnitIsPolled(t *testing.T) {
-	f := newFixture(t)
-	f.makeUpgradePending()
-	f.app.upgrades.unitsDir = filepath.Join(f.dir, "nowhere")
-	unit := &fakeUnit{active: "inactive", result: "success"}
-	f.useUnit(unit)
+	// died outside the playbook (sudoers said no): only that it failed
 	f.post("/upgrade", url.Values{}, true)
-	unit.set("failed", "exit-code", 1)
-	if !f.waitWatcherGone() {
-		t.Fatal("watcher still running")
-	}
-	wants(t, f.logs.String(), "cannot watch", "polling odio-upgrade.service", "odio-upgrade.service failed after")
-	_, body := f.get("/")
-	wants(t, body, "Upgrade: Failed (exit-code, exit 1).")
+	f.waitRun(upgrade.RunRunning)
+	f.api.setRun(`{"state":"failed","origin":"systemd"}`)
+	f.waitRun(upgrade.RunFailed)
+	_, body = f.get("/")
+	wants(t, body, `<p class="hint outcome err">Upgrade: Failed.</p>`)
 }
 
-func TestUnitFailedBeforeThisProcessIsShown(t *testing.T) {
+// A run failed before this process has no end line to read: only that it did.
+func TestFailedBeforeThisProcessIsShown(t *testing.T) {
+	f := newFixtureWith(t, `{"state":"failed","origin":"systemd"}`)
+	f.makeUpgradePending()
+	f.waitRun(upgrade.RunFailed)
+	_, body := f.get("/")
+	wants(t, body, "Upgrade: Failed.", "Apply now")
+}
+
+// Without odio-api nothing says whether a run is on, and nothing starts one.
+func TestOdioAPIAwayHidesApplyNow(t *testing.T) {
 	f := newFixture(t)
 	f.makeUpgradePending()
-	f.useUnit(&fakeUnit{active: "failed", result: "exit-code", code: 1})
+	f.api.hangUp(`{"state":"idle"}`, true)
+	f.waitRun("")
 	_, body := f.get("/")
-	wants(t, body, "Upgrade: Failed (exit-code, exit 1).", "Apply now")
+	wants(t, body, "Upgrades run through odio-api, which is not answering.")
+	if strings.Contains(body, "Apply now") {
+		t.Error("Apply now with no odio-api to run it")
+	}
+	_, body = f.post("/upgrade", url.Values{}, true)
+	wants(t, body, "odio-api is not answering")
+	wants(t, f.logs.String(), "upgrade: odio-api at http://")
+}
+
+// odio-api without an upgrade unit has no POST /upgrade/start: no Apply.
+func TestOdioAPIWithoutUpgradeUnitHidesApplyNow(t *testing.T) {
+	f := newFixture(t)
+	f.makeUpgradePending()
+	f.api.mu.Lock()
+	f.api.noStart = true
+	f.api.mu.Unlock()
+	f.api.hangUp(`{"state":"idle"}`, false)
+	f.waitUpgrades("heard can_upgrade false", func(r upgrade.Run) bool { return r.Known() && !r.CanStart })
+	_, body := f.get("/")
+	wants(t, body, "Upgrades run through odio-api, which cannot start one here.")
+	if strings.Contains(body, "Apply now") {
+		t.Error("Apply now with no upgrade unit to start")
+	}
+	_, body = f.post("/upgrade", url.Values{}, true)
+	wants(t, body, "odio-api cannot start an upgrade here")
+	if n := f.api.startCount(); n != 0 {
+		t.Errorf("starts = %d", n)
+	}
+}
+
+func TestNoOdioAPISaysSo(t *testing.T) {
+	f := newFixtureWith(t, "")
+	f.makeUpgradePending()
+	_, body := f.get("/")
+	wants(t, body, "Upgrades run through odio-api, and none is configured.")
+	if strings.Contains(body, "Apply now") {
+		t.Error("Apply now with no odio-api to run it")
+	}
+	_, body = f.post("/upgrade", url.Values{}, true)
+	wants(t, body, "no odio-api configured")
+}
+
+// odio-api answering without its upgrade backend is said as such, not as silence.
+func TestOdioAPIWithoutUpgradeBackendSaysSo(t *testing.T) {
+	f := newFixture(t)
+	f.makeUpgradePending()
+	f.api.mu.Lock()
+	f.api.off = true
+	f.api.mu.Unlock()
+	f.api.hangUp(`{"state":"idle"}`, false)
+	f.waitUpgrades("heard the backend is off", func(r upgrade.Run) bool { return r.Off })
+	_, body := f.get("/")
+	wants(t, body, "Upgrades run through odio-api, whose upgrade backend is off.")
+	if strings.Contains(body, "Apply now") {
+		t.Error("Apply now with no upgrade backend")
+	}
+	_, body = f.post("/upgrade", url.Values{}, true)
+	wants(t, body, "upgrade backend is off")
+}
+
+// Before the follower's first word odio-api is not "not answering": nobody asked yet.
+func TestUpgradesBeforeTheFirstReport(t *testing.T) {
+	var notified [][]string
+	u := newUpgrades("http://127.0.0.1:1", log.New(io.Discard, "", 0),
+		func(names ...string) { notified = append(notified, names) })
+	pending := &upgrade.Report{UpgradeAvailable: true}
+	if _, _, reach := u.State(); reach != reachConnecting {
+		t.Errorf("before: reach = %q", reach)
+	}
+	if _, err := u.Start(pending); err == nil || !strings.Contains(err.Error(), "not heard from yet") {
+		t.Errorf("before: Start = %v", err)
+	}
+	u.set(upgrade.Run{}) // the first try failed: unknown, and news
+	if len(notified) != 1 || notified[0][0] != "upgrade" {
+		t.Errorf("notified = %v, want the card", notified)
+	}
+	if _, _, reach := u.State(); reach != "" {
+		t.Errorf("after: reach = %q", reach)
+	}
+	if _, err := u.Start(pending); err == nil || !strings.Contains(err.Error(), "not answering") {
+		t.Errorf("after: Start = %v", err)
+	}
+	if _, _, reach := newUpgrades("", log.New(io.Discard, "", 0), nil).State(); reach != reachNone {
+		t.Errorf("no odio-api: reach = %q", reach)
+	}
 }
 
 func TestApplyWithNothingPendingIsRefused(t *testing.T) {
