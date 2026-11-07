@@ -29,7 +29,7 @@
 node — upgrades, components and DAC selection today, and meant to grow with
 the rest of the node's settings. It started as a rewrite of the `odio-upgrade`
 script that used to ship inside [odios](https://github.com/b0bbywan/odios).
-A single static Go binary (stdlib plus fsnotify), packaged as per-arch `.deb`s on
+A single static Go binary (stdlib only), packaged as per-arch `.deb`s on
 [apt.odio.love](https://apt.odio.love).
 
 ## Install
@@ -72,7 +72,7 @@ odioctl upgrade verify [--state PATH] [--expected-version TAG]
 odioctl pwa-url
 odioctl components [--state PATH] list [--json] | enable NAME | disable NAME
 odioctl dac list [--json] | status [--json] | set ID [--dry-run] | unset
-odioctl web [--bind 0.0.0.0] [--port 8021] [--socket PATH] [--systemd-only] [--ui-url URL] [--state PATH] [--config PATH]
+odioctl web [--bind 0.0.0.0] [--port 8021] [--socket PATH] [--systemd-only] [--odio-api URL] [--state PATH] [--config PATH]
 odioctl state [--state PATH] record < run.json | show
 odioctl motd [--state PATH]
 ```
@@ -217,10 +217,19 @@ directly (needs `/var/lib/odio` group-writable by `odio`, see below),
 config.txt through `sudo -n odioctl dac …` (needs that user in the `odioctl`
 group).
 
-The logo links to odio-ui at `http://<host>:8018/ui`, `<host>` being the name
-the browser used; `ODIOCTL_UI_URL` in `/etc/default/odioctl` (or `--ui-url`)
-replaces that guess, with an absolute URL or one from the root (`/ui`) — a
-relative one would land under the page's `<base>`.
+The logo links to odio-ui, odio-api's dashboard: `/ui` behind odio-api's
+proxy (the page is on its origin), else `http://<host>:<port>/ui`, `<host>`
+being the name the browser used and `<port>` `--odio-api`'s. No link without
+odio-api.
+
+Upgrades go through odio-api (≥ the release whose run follows the unit
+whoever started it), at `--odio-api` (or `ODIOCTL_ODIO_API` in
+`/etc/default/odioctl`), `http://127.0.0.1:8018` by default:
+"Apply now" is its `POST /upgrade/start`, and the Upgrade card is its run,
+followed from startup on its `GET /events` (from `GET /upgrade` on each
+connection) — running with the percent and step odios' progress callback
+streams to it, then done or failed, with what failed when its playbook said. When odio-api does not answer, the card says so and offers no
+Apply button; `ssh` + `sudo odioctl upgrade apply` stays the way round.
 
 #### Behind odio-api
 
@@ -234,7 +243,7 @@ instead of it once done.
 - **What odioctl reads from the proxy**, on that socket only (never on 8021,
   where anyone could forge them): `X-Forwarded-Prefix` becomes the page's
   `<base href>` (every URL of the page is relative to it), `X-Forwarded-Host`
-  the host of the odio-ui link and of an action's OAuth callback,
+  the host of an action's OAuth callback,
   `X-Forwarded-For` the address in the log.
 - **What the proxy must do**: strip the prefix from the path, `SetXForwarded()`
   (Go's `httputil.ReverseProxy`), *set* — not add — `X-Forwarded-Prefix`,
