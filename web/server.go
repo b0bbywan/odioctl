@@ -344,6 +344,12 @@ func hostOf(host string) string {
 // RunServe serves until SIGTERM/SIGINT, on the sockets systemd passed when
 // there are any, binding for itself otherwise.
 func RunServe(stdout, stderr io.Writer, cfg Config) int {
+	api, err := odioAPIBase(cfg.OdioAPI)
+	if err != nil {
+		fmt.Fprintf(stderr, "odioctl web: %v\n", err)
+		return 2
+	}
+	cfg.OdioAPI = api
 	lns, err := SystemdListeners()
 	source := " (passed by systemd)"
 	if err == nil && lns == nil && cfg.SystemdOnly {
