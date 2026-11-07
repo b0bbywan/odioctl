@@ -16,6 +16,8 @@ Type=simple
 # read it: `odioctl web` refreshes upgrades.json on every component toggle.
 # ODIOCTL_UI_URL=<url> is where the logo leads, when odio-ui is not at
 # http://<host>:8018/ui.
+# ODIOCTL_ODIO_API=<url> is odio-api's base URL when it is not at
+# http://127.0.0.1:8018 (empty for none).
 EnvironmentFile=-/etc/default/odioctl
 ExecStart=/usr/bin/odioctl web --systemd-only
 Restart=on-failure

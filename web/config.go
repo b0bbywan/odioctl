@@ -4,15 +4,19 @@
 package web
 
 import (
+	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/b0bbywan/odioctl/state"
 )
 
 const (
 	DefaultPort = 8021
-	OdioUIPort  = 8018 // odio-api's built-in dashboard, where upgrade progress is shown
+	OdioAPIPort = 8018               // odio-api: its dashboard
+	OdioAPIEnv  = "ODIOCTL_ODIO_API" // its base URL, set and empty for none
 )
 
 // Config is what `odioctl web` reads and writes, and the ports it speaks to.
@@ -30,6 +34,7 @@ type Config struct {
 	UpgradesPath string // "" → sibling of a custom StatePath, else /var/cache
 	Home         string // the target user's home, what an action's {home} becomes
 	RuntimeDir   string // the user manager's $XDG_RUNTIME_DIR, where it exposes its units
+	OdioAPI      string // odio-api's base URL; "" → none
 }
 
 func DefaultConfig() Config {
@@ -41,6 +46,11 @@ func DefaultConfig() Config {
 	// empty when unknown: an action that needs it is refused, not pointed
 	// at "/.cache".
 	home, _ := os.UserHomeDir()
+	// odio-api always listens on lo while its UI is on, unless odio says otherwise
+	api, ok := os.LookupEnv(OdioAPIEnv)
+	if !ok {
+		api = fmt.Sprintf("http://127.0.0.1:%d", OdioAPIPort)
+	}
 	return Config{
 		Bind:       "0.0.0.0",
 		Port:       DefaultPort,
@@ -49,6 +59,7 @@ func DefaultConfig() Config {
 		OdioctlBin: bin,
 		Home:       home,
 		RuntimeDir: os.Getenv("XDG_RUNTIME_DIR"),
+		OdioAPI:    api,
 	}
 }
 
@@ -56,6 +67,20 @@ func DefaultConfig() Config {
 // as long as a unit runs (odio-api follows the same links).
 func (c Config) UnitsDir() string {
 	return filepath.Join(c.RuntimeDir, "systemd", "units")
+}
+
+// odioAPIBase is s as a base the client appends /upgrade to: http(s), a
+// host, nothing after it but slashes (dropped). "" stays none.
+func odioAPIBase(s string) (string, error) {
+	if s == "" {
+		return "", nil
+	}
+	u, err := url.Parse(s)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" ||
+		strings.Trim(u.Path, "/") != "" || u.RawQuery != "" || u.Fragment != "" || u.User != nil {
+		return "", fmt.Errorf("odio-api %q (--odio-api or $%s): want http://host[:port]", s, OdioAPIEnv)
+	}
+	return strings.TrimRight(s, "/"), nil
 }
 
 func (c Config) ResolvedUpgradesPath() string {

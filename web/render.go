@@ -450,7 +450,7 @@ func RenderPage(app *App, o origin) (string, error) {
 	}
 	uiURL := app.Config().UIURL
 	if uiURL == "" {
-		uiURL = fmt.Sprintf("http://%s/ui", net.JoinHostPort(hostname, strconv.Itoa(OdioUIPort)))
+		uiURL = fmt.Sprintf("http://%s/ui", net.JoinHostPort(hostname, strconv.Itoa(OdioAPIPort)))
 	}
 	selfName, _ := os.Hostname()
 

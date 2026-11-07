@@ -190,6 +190,17 @@ func TestServeRefusesABrokenHandover(t *testing.T) {
 	}
 }
 
+func TestServeRefusesABadOdioAPI(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.OdioAPI = "127.0.0.1:8018"
+	cfg.Bind, cfg.Port = "127.0.0.1", 0
+	var stdout, stderr bytes.Buffer
+	rc := RunServe(&stdout, &stderr, cfg)
+	if rc != 2 || !strings.Contains(stderr.String(), `"127.0.0.1:8018"`) || stdout.Len() != 0 {
+		t.Errorf("rc = %d, stdout = %q, stderr = %q", rc, stdout.String(), stderr.String())
+	}
+}
+
 // Under the units, no socket passed means no door at all, not port 8021.
 func TestSystemdOnlyNeverBinds(t *testing.T) {
 	t.Setenv("LISTEN_PID", "")
