@@ -8,7 +8,9 @@ import (
 	"embed"
 	"fmt"
 	"html/template"
+	"net"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/b0bbywan/odioctl/components"
@@ -448,7 +450,7 @@ func RenderPage(app *App, o origin) (string, error) {
 	}
 	uiURL := app.Config().UIURL
 	if uiURL == "" {
-		uiURL = fmt.Sprintf("http://%s:%d/ui", hostname, OdioUIPort)
+		uiURL = fmt.Sprintf("http://%s/ui", net.JoinHostPort(hostname, strconv.Itoa(OdioUIPort)))
 	}
 	selfName, _ := os.Hostname()
 

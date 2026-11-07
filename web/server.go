@@ -332,15 +332,13 @@ func notPathChar(c rune) bool {
 	return (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && (c < '0' || c > '9') && !strings.ContainsRune("/-._~", c)
 }
 
-// hostOf is a Host header's hostname, without the port.
+// hostOf is a Host header's hostname, without the port, an IPv6 one without
+// its brackets: the odio-ui link and qbzd's --callback-host add them back.
 func hostOf(host string) string {
-	if strings.HasPrefix(host, "[") { // IPv6 literal
-		return strings.SplitAfter(host, "]")[0]
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		return h
 	}
-	if i := strings.LastIndex(host, ":"); i >= 0 {
-		return host[:i]
-	}
-	return host
+	return strings.Trim(host, "[]") // no port
 }
 
 // RunServe serves until SIGTERM/SIGINT, on the sockets systemd passed when

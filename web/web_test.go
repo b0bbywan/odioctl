@@ -1124,6 +1124,20 @@ func TestConfiguredUIURLWinsOverTheGuess(t *testing.T) {
 	}
 }
 
+func TestHostOf(t *testing.T) {
+	for in, want := range map[string]string{
+		"odio.local:8021": "odio.local",
+		"odio.local":      "odio.local",
+		"[fe80::1]:8021":  "fe80::1",
+		"[fe80::1]":       "fe80::1",
+		"":                "",
+	} {
+		if got := hostOf(in); got != want {
+			t.Errorf("hostOf(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 // viaProxy sends req to the fixture's app on a Unix socket, the way odio-api's
 // reverse proxy reaches it (headers as its SetXForwarded leaves them).
 func (f *fixture) viaProxy(req *http.Request) string {
