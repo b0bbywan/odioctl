@@ -15,7 +15,8 @@ Type=simple
 # pre-release instead of the published latest one (a test odio). Both units
 # read it: `odioctl web` refreshes upgrades.json on every component toggle.
 # ODIOCTL_ODIO_API=<url> is odio-api's base URL when it is not at
-# http://127.0.0.1:8018 (empty for none): the logo leads to its dashboard.
+# http://127.0.0.1:8018 (empty for none): upgrades start and are followed
+# through it, and the logo leads to its dashboard.
 EnvironmentFile=-/etc/default/odioctl
 ExecStart=/usr/bin/odioctl web --systemd-only
 Restart=on-failure

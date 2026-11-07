@@ -23,8 +23,9 @@ func runWeb(stdout, stderr io.Writer, args []string) int {
 		"through sudo will be refused")
 	fs.StringVar(&cfg.UpgradesPath, "upgrades", "", "path to upgrades.json "+
 		"(default: "+state.SystemUpgradesPath+", or next to a custom --state)")
-	fs.StringVar(&cfg.OdioAPI, "odio-api", cfg.OdioAPI, "odio-api's base URL: the logo leads to its dashboard ($"+
-		web.OdioAPIEnv+" when set; \"\" for none)")
+	fs.StringVar(&cfg.OdioAPI, "odio-api", cfg.OdioAPI, "odio-api's base URL: upgrades are started "+
+		"and followed through it, and the logo leads to its dashboard ($"+web.OdioAPIEnv+
+		" when set; \"\" for none)")
 	if code, done := parse(fs, args); done {
 		return code
 	}

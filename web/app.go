@@ -5,6 +5,7 @@ package web
 // each with its own lock. Every write ends in changes.Changed.
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
@@ -96,9 +97,13 @@ func NewApp(cfg Config, r Runners) *App {
 		changes: NewChanges(),
 	}
 	app.actions = newActions(r.Spawn, cfg.Home, app.log, app.changes.Changed)
-	app.upgrades = newUpgrades(cfg.UnitsDir(), app.log, app.changes.Changed)
+	app.upgrades = newUpgrades(cfg.OdioAPI, app.log, app.changes.Changed)
 	return app
 }
+
+// Follow keeps the upgrade card on odio-api's run until ctx is done: the
+// process's lifetime, from before it serves.
+func (a *App) Follow(ctx context.Context) { a.upgrades.follow(ctx) }
 
 func newToken() string {
 	b := make([]byte, 24)

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/b0bbywan/odioctl/state"
@@ -15,7 +14,7 @@ import (
 
 const (
 	DefaultPort = 8021
-	OdioAPIPort = 8018               // odio-api: its dashboard
+	OdioAPIPort = 8018               // odio-api: its dashboard, and the upgrades it runs
 	OdioAPIEnv  = "ODIOCTL_ODIO_API" // its base URL, set and empty for none
 )
 
@@ -32,8 +31,7 @@ type Config struct {
 	OdioctlBin   string
 	UpgradesPath string // "" → sibling of a custom StatePath, else /var/cache
 	Home         string // the target user's home, what an action's {home} becomes
-	RuntimeDir   string // the user manager's $XDG_RUNTIME_DIR, where it exposes its units
-	OdioAPI      string // odio-api's base URL; "" → none
+	OdioAPI      string // odio-api's base URL: it starts and tracks upgrades; "" → none
 }
 
 func DefaultConfig() Config {
@@ -56,15 +54,8 @@ func DefaultConfig() Config {
 		StatePath:  state.SystemStatePath,
 		OdioctlBin: bin,
 		Home:       home,
-		RuntimeDir: os.Getenv("XDG_RUNTIME_DIR"),
 		OdioAPI:    api,
 	}
-}
-
-// UnitsDir is where the user manager keeps an invocation:<unit> symlink for
-// as long as a unit runs (odio-api follows the same links).
-func (c Config) UnitsDir() string {
-	return filepath.Join(c.RuntimeDir, "systemd", "units")
 }
 
 // odioAPIBase is s as a base the client appends /upgrade to: http(s), a

@@ -324,6 +324,23 @@ a.btn { display: inline-block; text-decoration: none; }
 button.small { padding: 5px 10px; font-size: 13px; }
 /* The upgrade in progress: a button that says so and does nothing. */
 button:disabled { opacity: 0.6; cursor: default; pointer-events: none; }
+
+/* A running upgrade's progress, as odio-api relays it: odio-ui's ring, as a bar
+   (track at 0.2 of the accent, rounded fill). */
+.progress { display: flex; align-items: center; gap: 10px; margin-top: 14px; }
+.progress .hint { margin: 0; white-space: nowrap; }
+progress {
+  flex: 1;
+  height: 6px;
+  border: 0;
+  border-radius: 3px;
+  background: rgba(90, 184, 30, 0.2);
+  appearance: none;
+  -webkit-appearance: none;
+}
+progress::-webkit-progress-bar { background: rgba(90, 184, 30, 0.2); border-radius: 3px; }
+progress::-webkit-progress-value { background: var(--lime); border-radius: 3px; }
+progress::-moz-progress-bar { background: var(--lime); border-radius: 3px; }
 /* A required field still empty: the browser refuses the submit, say it first. */
 form:invalid button.primary { opacity: 0.6; cursor: not-allowed; }
 select { flex: 1 1 240px; min-width: 0; max-width: 100%; }
